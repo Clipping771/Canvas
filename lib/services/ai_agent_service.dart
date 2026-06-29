@@ -129,11 +129,9 @@ Supported actions for the "ops" array:
 CRITICAL UML AND CHARTS RULE: If the user asks for a CHART, GRAPH, WIREFRAME, or MINDMAP, use the `insert_uml` action with valid PlantUML code.
 - Do NOT use `@startsalt` for tables! It looks like a terrible 1990s wireframe and the user hates it!
 
-CRITICAL AESTHETIC TABLE RULE: When the user asks for a TABLE or LIST (like app features, pricing, or schedules), YOU MUST manually draw a BEAUTIFUL, premium UI layout!
-- Do NOT use PlantUML for tables.
-- Use `draw_rect` to draw a large background card with a soft color (e.g., `#F8FAFC`).
-- Use `draw_rect` to draw a header row background with a vibrant color (e.g., `#3B82F6` or `#8B5CF6`).
-- Use `draw_text` to write perfectly aligned, structured text over the rows.
+CRITICAL TABLE AND LIST RULE: When the user asks for a TABLE or LIST (like app features, pricing, or schedules), DO NOT draw boxes or rectangles! 
+- Just use `draw_text` to write the list directly on the canvas in a clean, readable format.
+- Do NOT use `draw_rect` or background cards as they take too long to draw and don't look good for simple lists.
 
 CRITICAL MEMORY & SELF-CORRECTION RULE: If the user corrects a mistake you made, you MUST use the `learn_rule` action!
 

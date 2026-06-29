@@ -13,9 +13,31 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Alignment> _topAlignment;
+  late Animation<Alignment> _bottomAlignment;
+
   String _currentFilter = 'Recent';
   List<String> get _filters => ['Recent', 'Starred', 'All'];
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat(reverse: true);
+    _topAlignment = TweenSequence<Alignment>([
+      TweenSequenceItem(tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight), weight: 1),
+    ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _bottomAlignment = TweenSequence<Alignment>([
+      TweenSequenceItem(tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft), weight: 1),
+    ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,31 +59,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: CustomScrollView(
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: _topAlignment.value,
+              end: _bottomAlignment.value,
+              colors: const [
+                Color(0xFFFFEBF0), // Light pink
+                Color(0xFFE3F2FD), // Light blue
+              ],
+            ),
+          ),
+          child: child,
+        );
+      },
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: CustomScrollView(
         slivers: [
-          SliverAppBar.large(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          SliverAppBar(
+            expandedHeight: 120,
+            backgroundColor: Colors.transparent,
             surfaceTintColor: Colors.transparent,
-            title: const Text(
-              'Notes',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.5,
+            pinned: true,
+            flexibleSpace: const FlexibleSpaceBar(
+              titlePadding: EdgeInsets.only(left: 20, bottom: 16),
+              title: Text(
+                'Explore',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 28,
+                  color: Color(0xFF1E1E1E),
+                  letterSpacing: -0.5,
+                ),
               ),
             ),
             actions: [
               IconButton(
-                icon: const Icon(CupertinoIcons.search, size: 24),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Search coming soon!')),
-                  );
-                },
-              ),
-              IconButton(
-                icon: const Icon(CupertinoIcons.settings, size: 24),
+                icon: const Icon(CupertinoIcons.settings, size: 24, color: Colors.black54),
                 onPressed: () {
                   Navigator.push(
                     context,
@@ -72,61 +110,111 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               const SizedBox(width: 8),
             ],
           ),
-          SliverToBoxAdapter(child: _buildFilterBar()),
-          if (allPages.isEmpty)
-            SliverFillRemaining(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      CupertinoIcons.doc_text,
-                      size: 64,
-                      color: Colors.grey[300],
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+              child: Container(
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.03),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
-                    const SizedBox(height: 16),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 16),
+                    Icon(CupertinoIcons.search, color: Colors.grey.shade400, size: 20),
+                    const SizedBox(width: 8),
                     Text(
-                      'No notes yet',
-                      style: TextStyle(color: Colors.grey[500], fontSize: 16),
+                      'Search',
+                      style: TextStyle(color: Colors.grey.shade400, fontSize: 16),
                     ),
                   ],
                 ),
               ),
-            )
-          else
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 220,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 0.85,
-                ),
-                delegate: SliverChildBuilderDelegate((context, index) {
-                  final item = allPages[index];
-                  return _buildNoteCard(
-                    item['page'] as NotePage,
-                    item['notebookId'] as String,
-                  );
-                }, childCount: allPages.length),
-              ),
             ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+          SliverToBoxAdapter(child: _buildFilterBar()),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 220,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 0.85,
+              ),
+              delegate: SliverChildBuilderDelegate((context, index) {
+                if (index == 0) {
+                  return _buildNewNoteCard(notebooks);
+                }
+                final item = allPages[index - 1];
+                return _buildNoteCard(
+                  item['page'] as NotePage,
+                  item['notebookId'] as String,
+                );
+              }, childCount: allPages.length + 1),
+            ),
+          ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        elevation: 4,
-        highlightElevation: 8,
-        shape: const CircleBorder(),
-        onPressed: () {
-          if (notebooks.isEmpty) {
-            ref.read(notebookProvider.notifier).addNotebook('My Notebook');
-          }
-          final defaultNotebook = ref.read(notebookProvider).first;
-          ref.read(notebookProvider.notifier).addPage(defaultNotebook.id);
-        },
-        child: const Icon(CupertinoIcons.add, color: Colors.white, size: 28),
+      ),
+    );
+  }
+
+  Widget _buildNewNoteCard(List<dynamic> notebooks) {
+    return GestureDetector(
+      onTap: () async {
+        if (notebooks.isEmpty) {
+          ref.read(notebookProvider.notifier).addNotebook('My Notebook');
+        }
+        final defaultNotebook = ref.read(notebookProvider).first;
+        await ref.read(notebookProvider.notifier).addPage(defaultNotebook.id);
+        
+        final updatedNotebook = ref.read(notebookProvider).firstWhere((n) => n.id == defaultNotebook.id);
+        final newPage = updatedNotebook.pages.last;
+        
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CanvasScreen(notebookId: defaultNotebook.id, pageId: newPage.id),
+          ),
+        );
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: const Color(0xFF4A90E2).withOpacity(0.3), width: 2),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                CupertinoIcons.add, 
+                color: const Color(0xFF4A90E2).withOpacity(0.5), 
+                size: 40,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'New Note',
+                style: TextStyle(
+                  color: Color(0xFF4A90E2),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -143,28 +231,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           final isSelected = _currentFilter == filter;
           return Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: FilterChip(
-              label: Text(
-                filter,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.black87,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-              selected: isSelected,
-              onSelected: (selected) {
+            child: GestureDetector(
+              onTap: () {
                 setState(() => _currentFilter = filter);
               },
-              backgroundColor: Colors.white,
-              selectedColor: Theme.of(context).colorScheme.primary,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-                side: BorderSide(
-                  color: isSelected ? Colors.transparent : Colors.grey.shade300,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(isSelected ? 0.2 : 0.05),
+                      blurRadius: isSelected ? 8 : 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  filter,
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : Colors.black87,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    fontSize: 14,
+                  ),
                 ),
               ),
-              showCheckmark: false,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             ),
           );
         },
@@ -186,17 +280,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(28),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withOpacity(0.03),
               blurRadius: 24,
               offset: const Offset(0, 8),
-            ),
-            BoxShadow(
-              color: Colors.black.withOpacity(0.02),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -209,26 +298,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 Expanded(
                   flex: 3,
                   child: Container(
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFF9F9FB),
-                      border: Border(
-                        bottom: BorderSide(color: Color(0xFFF0F0F0)),
-                      ),
-                    ),
+                    color: Colors.white,
                     child: Center(
-                      child: page.strokes.isNotEmpty
-                          ? Icon(
-                              CupertinoIcons.scribble,
-                              color: Colors.grey[400],
-                              size: 40,
-                            )
-                          : Text(
-                              'Empty',
-                              style: TextStyle(
-                                color: Colors.grey[400],
-                                fontSize: 13,
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0F4F8), // Soft blue background
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: page.strokes.isNotEmpty
+                            ? const Icon(
+                                CupertinoIcons.scribble,
+                                color: Color(0xFF4A90E2),
+                                size: 36,
+                              )
+                            : const Text(
+                                'Empty',
+                                style: TextStyle(
+                                  color: Color(0xFF4A90E2),
+                                  fontSize: 13,
+                                ),
                               ),
-                            ),
+                      ),
                     ),
                   ),
                 ),

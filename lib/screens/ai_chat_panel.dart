@@ -24,6 +24,7 @@ class AiChatPanel extends ConsumerStatefulWidget {
   final VoidCallback? onClose;
   final Matrix4? Function()? getTransform;
   final String insertionPosition;
+  final Function(Offset)? onCameraFocusRequired;
 
   const AiChatPanel({
     super.key,
@@ -32,6 +33,7 @@ class AiChatPanel extends ConsumerStatefulWidget {
     this.onClose,
     this.getTransform,
     this.insertionPosition = 'Bottom',
+    this.onCameraFocusRequired,
   });
 
   @override
@@ -110,6 +112,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       }
 
       String inkBoundsStr = "";
+      Offset? canvasTargetCenter;
+      
       if (minX != double.infinity) {
         final scaledMinX = (minX * 2.0).toInt();
         final scaledMinY = (minY * 2.0).toInt();
@@ -121,31 +125,22 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         double targetY = maxY + 50.0;
 
         switch (widget.insertionPosition) {
-          case 'Bottom':
-            targetX = minX; // Left-align so left margins match
-            targetY = maxY + 50.0;
-            break;
-          case 'Top':
-            targetY = minY - 300.0;
-            break;
-          case 'Left':
-            targetX = minX - 400.0;
-            targetY = (minY + maxY) / 2.0;
-            break;
-          case 'Right':
-            targetX = maxX + 50.0;
-            targetY = (minY + maxY) / 2.0;
-            break;
-          case 'Diagonal':
-            targetX = maxX + 50.0;
-            targetY = maxY + 50.0;
-            break;
-          case 'Center':
-            final center = transform.getTranslation(); // approximation
-            targetX = screenSize.width / 2.0;
-            targetY = screenSize.height / 2.0;
-            break;
+          case 'Bottom': targetX = (minX + maxX) / 2.0; targetY = maxY + 50.0; break;
+          case 'Top': targetX = (minX + maxX) / 2.0; targetY = minY - 300.0; break;
+          case 'Left': targetX = minX - 400.0; targetY = (minY + maxY) / 2.0; break;
+          case 'Right': targetX = maxX + 50.0; targetY = (minY + maxY) / 2.0; break;
+          case 'Diagonal': targetX = maxX + 50.0; targetY = maxY + 50.0; break;
+          case 'Center': targetX = screenSize.width / 2.0; targetY = screenSize.height / 2.0; break;
         }
+        
+        final inverse = Matrix4.copy(currentTransform ?? Matrix4.identity())..invert();
+        canvasTargetCenter = MatrixUtils.transformPoint(inverse, Offset(targetX, targetY));
+        
+        if (widget.onCameraFocusRequired != null) {
+          widget.onCameraFocusRequired!(canvasTargetCenter);
+        }
+        
+        drawingNotifier.setAiStatus('Thinking', target: canvasTargetCenter);
 
         final targetXScaled = (targetX * 2.0).toInt();
         final targetYScaled = (targetY * 2.0).toInt();
@@ -162,6 +157,15 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           inkBoundsStr =
               "\n\n[System Note: The existing canvas content is located within the bounding box [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested the layout position to be '${widget.insertionPosition}'. YOU MUST output absolute coordinates that place your new drawing exactly at [x: $targetXScaled, y: $targetYScaled] to align with their request!]";
         }
+      } else {
+        canvasTargetCenter = MatrixUtils.transformPoint(
+            Matrix4.copy(currentTransform ?? Matrix4.identity())..invert(),
+            Offset(screenSize.width / 2.0, screenSize.height / 2.0));
+            
+        if (widget.onCameraFocusRequired != null) {
+          widget.onCameraFocusRequired!(canvasTargetCenter);
+        }
+        drawingNotifier.setAiStatus('Thinking', target: canvasTargetCenter);
       }
 
       final scaledWidth = (screenSize.width * 2.0).toInt();
@@ -201,7 +205,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       String? rationaleText;
       String displayText = "";
 
-      if (response.startsWith("AI Error")) {
+      if (response.startsWith("AI Error") || response.startsWith("Error:")) {
         displayText = response;
       } else {
         try {
@@ -273,7 +277,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
              }
           }
 
-          drawingNotifier.setAiStatus('Working');
+          drawingNotifier.setAiStatus('Working', target: canvasTargetCenter);
           diffSummary = await _executeAiActions(actions);
           
           if (diffSummary == null || diffSummary.isEmpty) {
@@ -312,7 +316,28 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           }];
           
           drawingNotifier.setAiStatus('Working');
-          final summary = await _executeAiActions(actions);
+          final inverse = Matrix4.copy(transform)..invert();
+          
+          Offset? canvasTargetCenter;
+          if (minX != double.infinity) {
+            // targetX and targetY are available in the scope from earlier calculations
+            double tgtX = (minX + maxX) / 2.0;
+            double tgtY = maxY + 50.0;
+            switch (widget.insertionPosition) {
+              case 'Bottom': tgtX = (minX + maxX) / 2.0; tgtY = maxY + 50.0; break;
+              case 'Top': tgtX = (minX + maxX) / 2.0; tgtY = minY - 300.0; break;
+              case 'Left': tgtX = minX - 400.0; tgtY = (minY + maxY) / 2.0; break;
+              case 'Right': tgtX = maxX + 50.0; tgtY = (minY + maxY) / 2.0; break;
+              case 'Diagonal': tgtX = maxX + 50.0; tgtY = maxY + 50.0; break;
+              case 'Center': tgtX = screenSize.width / 2.0; tgtY = screenSize.height / 2.0; break;
+            }
+            canvasTargetCenter = MatrixUtils.transformPoint(inverse, Offset(tgtX, tgtY));
+          } else {
+             canvasTargetCenter = MatrixUtils.transformPoint(inverse, Offset(screenSize.width / 2.0, screenSize.height / 2.0));
+          }
+
+          drawingNotifier.setAiStatus('Working', target: canvasTargetCenter);
+          final summary = await _executeAiActions(actions, targetCenter: canvasTargetCenter);
           
           if (summary == null || summary.isEmpty) {
              // Forceful fallback if _executeAiActions aborted
@@ -347,6 +372,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
   Future<String> _executeAiActions(
     List actions, {
     bool isAnimateFrame = false,
+    Offset? targetCenter,
   }) async {
     if (!mounted) return "";
     final drawingNotifier = ref.read(drawingProvider.notifier);
@@ -472,9 +498,19 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         } else if (type == 'change_background') {
           final colorHex = action['color'] as String?;
           if (colorHex != null) {
-            final color = Color(int.parse(colorHex));
-            drawingNotifier.setCanvasBackgroundColor(color);
-            objectsUpdated++; // Prevent fallback
+            Color? color;
+            try {
+              if (colorHex.startsWith('#')) {
+                color = Color(int.parse(colorHex.substring(1), radix: 16) + 0xFF000000);
+              } else {
+                color = Color(int.parse(colorHex));
+              }
+            } catch (_) {}
+            
+            if (color != null) {
+              drawingNotifier.setCanvasBackgroundColor(color);
+              objectsUpdated++; // Prevent fallback
+            }
           }
           continue;
         } else if (type == 'trigger_effect') {
@@ -979,6 +1015,31 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       // Removed strict auto-layout. We must trust the AI's spatial coordinates so it can draw things around/next to other objects!
     }
 
+    // INTERCEPT: Automatically shift all newly generated strokes to perfectly align with targetCenter!
+    if (newStrokes.isNotEmpty && targetCenter != null && widget.insertionPosition != 'Formatted' && widget.insertionPosition != 'Random') {
+      double minX = double.infinity, minY = double.infinity;
+      double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+      for (var s in newStrokes) {
+        for (var p in s.points) {
+          if (p.dx < minX) minX = p.dx;
+          if (p.dy < minY) minY = p.dy;
+          if (p.dx > maxX) maxX = p.dx;
+          if (p.dy > maxY) maxY = p.dy;
+        }
+      }
+      
+      if (minX != double.infinity) {
+        final currentCenter = Offset((minX + maxX) / 2, (minY + maxY) / 2);
+        final shift = targetCenter - currentCenter;
+        
+        for (int i = 0; i < newStrokes.length; i++) {
+          final s = newStrokes[i];
+          final shiftedPoints = s.points.map((p) => p + shift).toList();
+          newStrokes[i] = s.copyWith(points: shiftedPoints);
+        }
+      }
+    }
+
     double? finalMaxY;
     if (newStrokes.isNotEmpty) {
       double minX = double.infinity, minY = double.infinity;
@@ -1006,6 +1067,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     }
 
     if (tweens.isNotEmpty || newStrokes.isNotEmpty) {
+      drawingNotifier.setAiStatus(null);
       widget.onDrawStart?.call();
     }
 
@@ -1224,7 +1286,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                                 size: 16,
                               ),
                             ),
-                            Expanded(
+                            Flexible(
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 16,

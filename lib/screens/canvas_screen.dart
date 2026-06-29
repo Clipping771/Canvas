@@ -30,12 +30,60 @@ class CanvasScreen extends ConsumerStatefulWidget {
   ConsumerState<CanvasScreen> createState() => _CanvasScreenState();
 }
 
-class _CanvasScreenState extends ConsumerState<CanvasScreen> {
+class _CanvasScreenState extends ConsumerState<CanvasScreen>
+    with TickerProviderStateMixin {
   late String _currentPageId = widget.pageId;
   bool _isChatOpen = false;
   bool _showToolbox = true;
   String _insertionPosition = 'Bottom';
-  final GlobalKey<CanvasWidgetState> _canvasKey = GlobalKey();
+  final GlobalKey<CanvasWidgetState> _canvasKey = GlobalKey<CanvasWidgetState>();
+
+  AnimationController? _cameraController;
+  Animation<Matrix4>? _cameraAnimation;
+
+  @override
+  void dispose() {
+    _cameraController?.dispose();
+    super.dispose();
+  }
+
+  void _focusOnTarget(Offset targetCenter) {
+    if (_canvasKey.currentState == null) return;
+    
+    final size = MediaQuery.of(context).size;
+    final controller = _canvasKey.currentState!.transformationController;
+    final currentMatrix = controller.value;
+    
+    final targetScale = currentMatrix.getMaxScaleOnAxis(); 
+    
+    final availableWidth = size.width; 
+    final targetX = (availableWidth / 2) - (targetCenter.dx * targetScale);
+    final targetY = (size.height / 2) - (targetCenter.dy * targetScale);
+
+    final targetMatrix = Matrix4.identity()
+      ..translate(targetX, targetY)
+      ..scale(targetScale);
+      
+    _cameraController?.dispose();
+    _cameraController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    
+    _cameraAnimation = Matrix4Tween(
+      begin: currentMatrix,
+      end: targetMatrix,
+    ).animate(CurvedAnimation(
+      parent: _cameraController!,
+      curve: Curves.easeInOut,
+    ));
+    
+    _cameraAnimation!.addListener(() {
+      controller.value = _cameraAnimation!.value;
+    });
+    
+    _cameraController!.forward();
+  }
 
   void _toggleChat() {
     setState(() {
@@ -73,9 +121,16 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
     final page = notebook.pages[pageIndex];
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFBFBFD),
+      backgroundColor: const Color(0xFFF1F8F9), // Very pale cyan background
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.white.withOpacity(0.8), // Glassmorphic look
+        flexibleSpace: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
         foregroundColor: Colors.black87,
         elevation: 0,
         centerTitle: true,
@@ -131,6 +186,10 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
                   context: context,
                   builder: (_) => const AchievementsDialog(),
                 );
+              } else if (value == 'change_layout') {
+                _showLayoutDialog();
+              } else if (value == 'change_animation') {
+                _showAnimationDialog();
               } else if (value == 'rename') {
                 _showRenameDialog(notebook.id, page);
               } else if (value == 'delete') {
@@ -182,143 +241,40 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
                 child: const Text('Show Toolbox'),
               ),
               const PopupMenuDivider(),
-              PopupMenuItem(
-                enabled: false,
+              PopupMenuItem<String>(
+                value: 'change_layout',
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Row(
                       children: [
-                        Icon(
-                          CupertinoIcons.arrow_up_down_square,
-                          size: 20,
-                          color: Colors.black54,
-                        ),
+                        Icon(CupertinoIcons.arrow_up_down_square, size: 20, color: Colors.black54),
                         SizedBox(width: 12),
-                        Text(
-                          'Insert Layout',
-                          style: TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                        Text('Insert Layout', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500)),
                       ],
                     ),
-                    const SizedBox(width: 16),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _insertionPosition,
-                          isDense: true,
-                          iconSize: 18,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          onChanged: (String? newValue) {
-                            if (newValue != null) {
-                              setState(() {
-                                _insertionPosition = newValue;
-                              });
-                              Navigator.pop(context);
-                            }
-                          },
-                          items:
-                              <String>[
-                                'Top',
-                                'Bottom',
-                                'Left',
-                                'Right',
-                                'Diagonal',
-                                'Center',
-                              ].map<DropdownMenuItem<String>>((String value) {
-                                return DropdownMenuItem<String>(
-                                  value: value,
-                                  child: Text(value),
-                                );
-                              }).toList(),
-                        ),
-                      ),
+                    Text(
+                      _insertionPosition,
+                      style: const TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
               ),
-              PopupMenuItem(
-                enabled: false,
+              PopupMenuItem<String>(
+                value: 'change_animation',
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Row(
                       children: [
-                        Icon(
-                          CupertinoIcons.wand_stars,
-                          size: 20,
-                          color: Colors.purple,
-                        ),
+                        Icon(CupertinoIcons.wand_stars, size: 20, color: Colors.purple),
                         SizedBox(width: 12),
-                        Text(
-                          'Animations',
-                          style: TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                        Text('Animations', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500)),
                       ],
                     ),
-                    const SizedBox(width: 16),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<EasterEggMode>(
-                          value: ref.watch(drawingProvider).easterEggMode,
-                          isDense: true,
-                          iconSize: 18,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          onChanged: (EasterEggMode? newValue) {
-                            if (newValue != null) {
-                              ref
-                                  .read(drawingProvider.notifier)
-                                  .setEasterEggMode(newValue);
-                              Navigator.pop(context);
-                            }
-                          },
-                          items: EasterEggMode.values
-                              .map<DropdownMenuItem<EasterEggMode>>((
-                                EasterEggMode value,
-                              ) {
-                                return DropdownMenuItem<EasterEggMode>(
-                                  value: value,
-                                  child: Text(
-                                    value.name[0].toUpperCase() +
-                                        value.name.substring(1),
-                                  ),
-                                );
-                              })
-                              .toList(),
-                        ),
-                      ),
+                    Text(
+                      ref.watch(drawingProvider).easterEggMode.name[0].toUpperCase() + ref.watch(drawingProvider).easterEggMode.name.substring(1),
+                      style: const TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -512,6 +468,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
               ),
             ),
 
+
           Positioned(
             right: 16,
             bottom: 110, // Avoid overlapping the dock
@@ -520,42 +477,13 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
               child: AiChatPanel(
                 onDrawStart: () {
                   setState(() => _isChatOpen = false);
-                  final bounds = ref.read(drawingProvider).lastAddedBounds;
-                  if (bounds != null && _canvasKey.currentState != null) {
-                    final matrix =
-                        _canvasKey.currentState!.transformationController.value;
-                    final scale = matrix.getMaxScaleOnAxis();
-                    final size = MediaQuery.of(context).size;
-
-                    final newMatrix = matrix.clone();
-                    newMatrix.setTranslationRaw(
-                      (size.width / 2) - (bounds.center.dx * scale),
-                      (size.height / 2) - (bounds.center.dy * scale),
-                      0,
-                    );
-                    _canvasKey.currentState!.transformationController.value =
-                        newMatrix;
-                  }
                 },
                 onDrawEnd: (newMaxY) {
                   setState(() => _isChatOpen = true);
-                  final bounds = ref.read(drawingProvider).lastAddedBounds;
-                  if (bounds != null && _canvasKey.currentState != null) {
-                    final matrix =
-                        _canvasKey.currentState!.transformationController.value;
-                    final scale = matrix.getMaxScaleOnAxis();
-                    final size = MediaQuery.of(context).size;
-
-                    final newMatrix = matrix.clone();
-                    // Center the camera precisely on the new drawing
-                    newMatrix.setTranslationRaw(
-                      (size.width / 2) - (bounds.center.dx * scale),
-                      (size.height / 2) - (bounds.center.dy * scale),
-                      0,
-                    );
-                    _canvasKey.currentState!.transformationController.value =
-                        newMatrix;
-                  }
+                },
+                onCameraFocusRequired: (target) {
+                  setState(() => _isChatOpen = false);
+                  _focusOnTarget(target);
                 },
                 onClose: _toggleChat,
                 getTransform: () =>
@@ -589,65 +517,62 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
   }
 
   Widget _buildFloatingDock() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(30),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.65),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(
-              color: Colors.white.withOpacity(0.2),
-              width: 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.2),
-                blurRadius: 15,
-                offset: const Offset(0, 10),
-              ),
-            ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(40),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
           ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.image, color: Colors.white),
+                  icon: const Icon(Icons.image, color: Colors.black87),
                   tooltip: 'Insert Image',
                   onPressed: _pickImage,
                 ),
                 IconButton(
-                  icon: const Icon(Icons.paste, color: Colors.white),
+                  icon: const Icon(Icons.paste, color: Colors.black87),
                   tooltip: 'Paste Image',
                   onPressed: _pasteImage,
                 ),
                 IconButton(
-                  icon: const Icon(Icons.account_tree, color: Colors.white),
+                  icon: const Icon(Icons.account_tree, color: Colors.black87),
                   tooltip: 'Create UML',
                   onPressed: _showUmlDialog,
                 ),
                 Container(
                   width: 1,
                   height: 24,
-                  color: Colors.white30,
+                  color: Colors.grey.shade300,
                   margin: const EdgeInsets.symmetric(horizontal: 8),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.undo, color: Colors.white),
+                  icon: const Icon(Icons.undo, color: Colors.black87),
                   onPressed: () => ref.read(drawingProvider.notifier).undo(),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.redo, color: Colors.white),
+                  icon: const Icon(Icons.redo, color: Colors.black87),
                   onPressed: () => ref.read(drawingProvider.notifier).redo(),
                 ),
                 Container(
                   width: 1,
                   height: 24,
-                  color: Colors.white30,
+                  color: Colors.grey.shade300,
                   margin: const EdgeInsets.symmetric(horizontal: 8),
                 ),
                 _buildToolButton(ToolType.pan, Icons.pan_tool),
@@ -671,9 +596,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
               ],
             ),
           ),
-        ),
-      ),
-    );
+        );
   }
 
   Widget _buildDrawingToolButton() {
@@ -694,7 +617,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2.0),
       child: IconButton(
-        icon: Icon(icon, color: isDrawingTool ? Colors.white : Colors.white38),
+        icon: Icon(icon, color: isDrawingTool ? Theme.of(context).colorScheme.primary : Colors.black54),
         onPressed: () {
           if (isDrawingTool) {
             _showToolSettingsDialog();
@@ -714,7 +637,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
     if (iconOrBuilder is IconData) {
       iconWidget = Icon(
         iconOrBuilder,
-        color: isSelected ? Colors.white : Colors.white38,
+        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.black54,
       );
     } else if (iconOrBuilder is Widget Function(bool)) {
       iconWidget = iconOrBuilder(isSelected);
@@ -745,7 +668,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
         height: 12,
         decoration: BoxDecoration(
           border: Border.all(
-            color: isSelected ? Colors.white : Colors.white38,
+            color: isSelected ? Theme.of(context).colorScheme.primary : Colors.black54,
             width: 2,
           ),
           borderRadius: BorderRadius.circular(3),
@@ -754,7 +677,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
           children: [
             Expanded(
               child: Container(
-                color: isSelected ? Colors.white : Colors.white38,
+                color: isSelected ? Theme.of(context).colorScheme.primary : Colors.black54,
               ),
             ),
             Expanded(child: Container()),
@@ -889,6 +812,86 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
               ),
             );
           },
+        );
+      },
+    );
+  }
+
+  void _showLayoutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: const Text('Insert Layout Position'),
+          children: ['Top', 'Bottom', 'Left', 'Right', 'Diagonal', 'Center']
+              .map((value) => SimpleDialogOption(
+                    onPressed: () {
+                      setState(() {
+                        _insertionPosition = value;
+                      });
+                      Navigator.pop(context);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _insertionPosition == value
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_unchecked,
+                            color: _insertionPosition == value
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.grey,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(value, style: const TextStyle(fontSize: 16)),
+                        ],
+                      ),
+                    ),
+                  ))
+              .toList(),
+        );
+      },
+    );
+  }
+
+  void _showAnimationDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final currentMode = ref.watch(drawingProvider).easterEggMode;
+        return SimpleDialog(
+          title: const Text('Animations Mode'),
+          children: EasterEggMode.values
+              .map((value) => SimpleDialogOption(
+                    onPressed: () {
+                      ref.read(drawingProvider.notifier).setEasterEggMode(value);
+                      Navigator.pop(context);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Row(
+                        children: [
+                          Icon(
+                            currentMode == value
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_unchecked,
+                            color: currentMode == value
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.grey,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            value.name[0].toUpperCase() + value.name.substring(1),
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ))
+              .toList(),
         );
       },
     );
@@ -1149,80 +1152,6 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _AiStatusOverlay extends StatelessWidget {
-  final String status;
-  const _AiStatusOverlay({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          status,
-          style: GoogleFonts.nanumPenScript(
-            textStyle: const TextStyle(color: Colors.black54, fontSize: 28),
-          ),
-        ),
-        const _AnimatedDots(),
-      ],
-    );
-  }
-}
-
-class _AnimatedDots extends StatefulWidget {
-  const _AnimatedDots();
-
-  @override
-  _AnimatedDotsState createState() => _AnimatedDotsState();
-}
-
-class _AnimatedDotsState extends State<_AnimatedDots>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        String dots = "";
-        if (_controller.value > 0.75) {
-          dots = "...";
-        } else if (_controller.value > 0.5)
-          dots = "..";
-        else if (_controller.value > 0.25)
-          dots = ".";
-
-        return SizedBox(
-          width: 30,
-          child: Text(
-            dots,
-            style: GoogleFonts.nanumPenScript(
-              textStyle: const TextStyle(color: Colors.black54, fontSize: 28),
-            ),
-          ),
-        );
-      },
     );
   }
 }

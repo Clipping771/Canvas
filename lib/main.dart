@@ -9,6 +9,15 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await StorageService.init();
 
+  // Preload handwriting fonts used by the AI to prevent "flashing" from sans-serif
+  try {
+    GoogleFonts.nanumPenScript();
+    GoogleFonts.galada();
+    await GoogleFonts.pendingFonts();
+  } catch (e) {
+    debugPrint("Warning: Failed to preload fonts: $e");
+  }
+
   runApp(const ProviderScope(child: NoteSketchProApp()));
 }
 
@@ -27,16 +36,14 @@ class NoteSketchProApp extends ConsumerWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: const ColorScheme.light(
-          primary: Colors.black, // Sleek black
+          primary: Color(0xFF4A90E2), // Soft vibrant blue
           onPrimary: Colors.white,
-          secondary: Color(0xFF5856D6), // Apple purple
+          secondary: Color(0xFFFFB3B3), // Soft pastel peach/pink
           surface: Colors.white,
-          onSurface: Colors.black,
+          onSurface: Color(0xFF1E1E1E), // Soft black for text
         ),
         fontFamily: fontFamily,
-        scaffoldBackgroundColor: const Color(
-          0xFFFBFBFD,
-        ), // Apple-like off-white
+        scaffoldBackgroundColor: Colors.white,
         appBarTheme: AppBarTheme(
           backgroundColor: Colors.transparent,
           elevation: 0,

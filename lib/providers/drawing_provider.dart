@@ -42,6 +42,7 @@ class DrawingState {
   final Rect? lastDetectedShapeBounds;
   final Color? canvasBackgroundColor;
   final String? aiStatus; // Null when not active
+  final Offset? aiStatusTarget; // Target position in canvas coordinates
 
   DrawingState({
     this.strokes = const [],
@@ -62,6 +63,7 @@ class DrawingState {
     this.lastDetectedShapeBounds,
     this.canvasBackgroundColor = Colors.white,
     this.aiStatus,
+    this.aiStatusTarget,
   });
 
   DrawingState copyWith({
@@ -87,6 +89,7 @@ class DrawingState {
     bool clearEasterEgg = false,
     Color? canvasBackgroundColor,
     String? aiStatus,
+    Offset? aiStatusTarget,
     bool clearAiStatus = false,
   }) {
     return DrawingState(
@@ -120,6 +123,7 @@ class DrawingState {
       canvasBackgroundColor:
           canvasBackgroundColor ?? this.canvasBackgroundColor,
       aiStatus: clearAiStatus ? null : (aiStatus ?? this.aiStatus),
+      aiStatusTarget: clearAiStatus ? null : (aiStatusTarget ?? this.aiStatusTarget),
     );
   }
 }
@@ -1253,11 +1257,11 @@ class DrawingNotifier extends Notifier<DrawingState> {
     state = state.copyWith(canvasBackgroundColor: color);
   }
 
-  void setAiStatus(String? status) {
+  void setAiStatus(String? status, {Offset? target}) {
     if (status == null) {
       state = state.copyWith(clearAiStatus: true);
     } else {
-      state = state.copyWith(aiStatus: status);
+      state = state.copyWith(aiStatus: status, aiStatusTarget: target);
     }
   }
 

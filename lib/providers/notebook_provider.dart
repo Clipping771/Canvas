@@ -1,8 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import 'dart:ui';
 import '../models/notebook.dart';
 import '../models/page.dart';
+import '../models/stroke.dart';
+import '../models/tool_type.dart';
 import '../services/storage_service.dart';
+import '../services/trivia_service.dart';
 
 class NotebookNotifier extends Notifier<List<Notebook>> {
   @override
@@ -39,8 +43,17 @@ class NotebookNotifier extends Notifier<List<Notebook>> {
     save();
   }
 
-  void addPage(String notebookId) {
-    final newPage = NotePage(id: const Uuid().v4(), strokes: []);
+  Future<void> addPage(String notebookId) async {
+    final triviaText = await TriviaService.getDailySurprise();
+    final triviaStroke = Stroke(
+      points: [const Offset(50100, 50200)],
+      color: const Color(0xFF4A90E2),
+      size: 40.0,
+      toolType: ToolType.pen,
+      text: triviaText,
+    );
+    
+    final newPage = NotePage(id: const Uuid().v4(), strokes: [triviaStroke]);
 
     state = state.map((n) {
       if (n.id == notebookId) {

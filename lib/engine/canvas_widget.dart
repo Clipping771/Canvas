@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'selection_overlay.dart';
 import '../widgets/weather_widget.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class CanvasWidget extends ConsumerStatefulWidget {
   const CanvasWidget({super.key});
@@ -248,9 +249,149 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
                   notifier.clearSelection();
                 },
               ),
+            if (drawingState.aiStatus != null && drawingState.aiStatusTarget != null)
+              Positioned(
+                left: drawingState.aiStatusTarget!.dx,
+                top: drawingState.aiStatusTarget!.dy,
+                child: AiStatusOverlay(status: drawingState.aiStatus!),
+              ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class AiStatusOverlay extends StatelessWidget {
+  final String status;
+  const AiStatusOverlay({super.key, required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedShimmerText(
+          text: status,
+          style: GoogleFonts.nanumPenScript(
+            textStyle: const TextStyle(fontSize: 28),
+          ),
+        ),
+        const AnimatedDots(),
+      ],
+    );
+  }
+}
+
+class AnimatedDots extends StatefulWidget {
+  const AnimatedDots({super.key});
+
+  @override
+  AnimatedDotsState createState() => AnimatedDotsState();
+}
+
+class AnimatedDotsState extends State<AnimatedDots>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        String dots = "";
+        if (_controller.value > 0.75) {
+          dots = "...";
+        } else if (_controller.value > 0.5) {
+          dots = "..";
+        } else if (_controller.value > 0.25) {
+          dots = ".";
+        }
+
+        return SizedBox(
+          width: 30,
+          child: Text(
+            dots,
+            style: GoogleFonts.nanumPenScript(
+              textStyle: const TextStyle(color: Colors.black54, fontSize: 28),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class AnimatedShimmerText extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  
+  const AnimatedShimmerText({
+    super.key, 
+    required this.text,
+    required this.style,
+  });
+
+  @override
+  State<AnimatedShimmerText> createState() => _AnimatedShimmerTextState();
+}
+
+class _AnimatedShimmerTextState extends State<AnimatedShimmerText> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (bounds) {
+            return LinearGradient(
+              colors: const [
+                Colors.black38,
+                Colors.black87,
+                Colors.black38,
+              ],
+              stops: const [0.0, 0.5, 1.0],
+              begin: const Alignment(-1.0, -0.5),
+              end: const Alignment(2.0, 0.5),
+              transform: GradientRotation(_controller.value * 2 * 3.14159),
+            ).createShader(bounds);
+          },
+          child: Text(widget.text, style: widget.style),
+        );
+      },
     );
   }
 }

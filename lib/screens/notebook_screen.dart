@@ -78,8 +78,8 @@ class NotebookScreen extends ConsumerWidget {
               },
             ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          ref.read(notebookProvider.notifier).addPage(notebook.id);
+        onPressed: () async {
+          await ref.read(notebookProvider.notifier).addPage(notebook.id);
         },
         child: const Icon(Icons.add),
       ),

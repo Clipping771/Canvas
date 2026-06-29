@@ -1,0 +1,12 @@
+enum ToolType {
+  pen,
+  eraser,
+  highlighter,
+  pan,
+  latex,
+  select,
+  uml,
+  widget,
+  brush,
+  fill,
+}

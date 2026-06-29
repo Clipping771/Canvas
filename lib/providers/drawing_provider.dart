@@ -1,0 +1,1343 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'dart:async';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/stroke.dart';
+import '../models/tool_type.dart';
+import '../models/easter_egg_mode.dart';
+import '../models/canvas_environment.dart';
+import '../engine/particle_engine.dart';
+import '../engine/shape_recognizer.dart';
+import '../engine/sound_engine.dart';
+import 'gamification_provider.dart';
+
+class TweenData {
+  final Rect bounds;
+  final double dx;
+  final double dy;
+  final double scale;
+  final double rotation;
+  TweenData(this.bounds, this.dx, this.dy, this.scale, this.rotation);
+}
+
+class DrawingState {
+  final List<Stroke> strokes;
+  final List<List<Stroke>> undoHistory;
+  final List<List<Stroke>> redoHistory;
+  final Color currentColor;
+  final double currentSize;
+  final ToolType currentTool;
+  final List<Stroke> selectedStrokes;
+  final List<Stroke>? previewTransformedStrokes;
+  final Rect? selectionBounds;
+  final Rect? lastAddedBounds;
+  final EasterEggMode easterEggMode;
+  final CanvasEnvironment canvasEnvironment;
+  final EasterEggEffect? activeEffect;
+  final DateTime? effectTriggerTime;
+  final ShapeType? lastDetectedShape;
+  final Rect? lastDetectedShapeBounds;
+  final Color? canvasBackgroundColor;
+  final String? aiStatus; // Null when not active
+
+  DrawingState({
+    this.strokes = const [],
+    this.undoHistory = const [],
+    this.redoHistory = const [],
+    this.currentColor = Colors.black,
+    this.currentSize = 2.0,
+    this.currentTool = ToolType.pen,
+    this.selectedStrokes = const [],
+    this.previewTransformedStrokes,
+    this.selectionBounds,
+    this.lastAddedBounds,
+    this.easterEggMode = EasterEggMode.discovery,
+    this.canvasEnvironment = CanvasEnvironment.normal,
+    this.activeEffect,
+    this.effectTriggerTime,
+    this.lastDetectedShape,
+    this.lastDetectedShapeBounds,
+    this.canvasBackgroundColor = Colors.white,
+    this.aiStatus,
+  });
+
+  DrawingState copyWith({
+    List<Stroke>? strokes,
+    List<List<Stroke>>? undoHistory,
+    List<List<Stroke>>? redoHistory,
+    Color? currentColor,
+    double? currentSize,
+    ToolType? currentTool,
+    List<Stroke>? selectedStrokes,
+    List<Stroke>? previewTransformedStrokes,
+    Rect? selectionBounds,
+    Rect? lastAddedBounds,
+    EasterEggMode? easterEggMode,
+    CanvasEnvironment? canvasEnvironment,
+    EasterEggEffect? activeEffect,
+    DateTime? effectTriggerTime,
+    ShapeType? lastDetectedShape,
+    Rect? lastDetectedShapeBounds,
+    bool clearSelection = false,
+    bool clearPreview = false,
+    bool clearLastAdded = false,
+    bool clearEasterEgg = false,
+    Color? canvasBackgroundColor,
+    String? aiStatus,
+    bool clearAiStatus = false,
+  }) {
+    return DrawingState(
+      strokes: strokes ?? this.strokes,
+      undoHistory: undoHistory ?? this.undoHistory,
+      redoHistory: redoHistory ?? this.redoHistory,
+      currentColor: currentColor ?? this.currentColor,
+      currentSize: currentSize ?? this.currentSize,
+      currentTool: currentTool ?? this.currentTool,
+      selectedStrokes: clearSelection
+          ? []
+          : (selectedStrokes ?? this.selectedStrokes),
+      previewTransformedStrokes: clearPreview
+          ? null
+          : (previewTransformedStrokes ?? this.previewTransformedStrokes),
+      selectionBounds: clearSelection
+          ? null
+          : (selectionBounds ?? this.selectionBounds),
+      lastAddedBounds: clearLastAdded
+          ? null
+          : (lastAddedBounds ?? this.lastAddedBounds),
+      easterEggMode: easterEggMode ?? this.easterEggMode,
+      canvasEnvironment: canvasEnvironment ?? this.canvasEnvironment,
+      activeEffect: clearEasterEgg ? null : (activeEffect ?? this.activeEffect),
+      effectTriggerTime: clearEasterEgg
+          ? null
+          : (effectTriggerTime ?? this.effectTriggerTime),
+      lastDetectedShape: lastDetectedShape ?? this.lastDetectedShape,
+      lastDetectedShapeBounds:
+          lastDetectedShapeBounds ?? this.lastDetectedShapeBounds,
+      canvasBackgroundColor:
+          canvasBackgroundColor ?? this.canvasBackgroundColor,
+      aiStatus: clearAiStatus ? null : (aiStatus ?? this.aiStatus),
+    );
+  }
+}
+
+class DrawingNotifier extends Notifier<DrawingState> {
+  @override
+  DrawingState build() {
+    return DrawingState();
+  }
+
+  Stroke? _currentStroke;
+
+  void selectStrokesInRect(Rect rect) {
+    List<Stroke> selected = [];
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+
+    for (var stroke in state.strokes) {
+      bool intersects = false;
+
+      if (stroke.decodedImage != null && stroke.points.isNotEmpty) {
+        final imgRect = Rect.fromLTWH(
+          stroke.points.first.dx,
+          stroke.points.first.dy,
+          stroke.decodedImage!.width.toDouble(),
+          stroke.decodedImage!.height.toDouble(),
+        );
+        if (rect.overlaps(imgRect) || rect.contains(stroke.points.first)) {
+          intersects = true;
+        }
+      } else if (stroke.text != null && stroke.points.isNotEmpty) {
+        final lines = stroke.text!.split('\n');
+        final maxLineLength = lines
+            .map((l) => l.length)
+            .reduce((a, b) => a > b ? a : b);
+        final width = stroke.size * maxLineLength * 0.7;
+        final height = stroke.size * 1.5 * lines.length;
+        final textRect = Rect.fromLTWH(
+          stroke.points.first.dx,
+          stroke.points.first.dy,
+          width,
+          height,
+        ).inflate(15);
+        if (rect.overlaps(textRect) || rect.contains(stroke.points.first)) {
+          intersects = true;
+        }
+      } else {
+        for (var p in stroke.points) {
+          if (rect.contains(p)) {
+            intersects = true;
+            break;
+          }
+        }
+      }
+
+      if (intersects) {
+        selected.add(stroke);
+        final bounds = stroke.bounds;
+        if (bounds.left < minX) minX = bounds.left;
+        if (bounds.top < minY) minY = bounds.top;
+        if (bounds.right > maxX) maxX = bounds.right;
+        if (bounds.bottom > maxY) maxY = bounds.bottom;
+      }
+    }
+
+    if (selected.isNotEmpty) {
+      state = state.copyWith(
+        selectedStrokes: selected,
+        selectionBounds: Rect.fromLTRB(minX, minY, maxX, maxY),
+      );
+    } else {
+      clearSelection();
+    }
+  }
+
+  void clearSelection() {
+    if (state.selectedStrokes.isNotEmpty || state.selectionBounds != null) {
+      state = state.copyWith(clearSelection: true, clearPreview: true);
+    }
+  }
+
+  void setEasterEggMode(EasterEggMode mode) {
+    state = state.copyWith(easterEggMode: mode, clearEasterEgg: true);
+  }
+
+  void clearEasterEgg() {
+    state = state.copyWith(clearEasterEgg: true);
+  }
+
+  void _checkEasterEggs(String text) {
+    if (state.easterEggMode != EasterEggMode.discovery) return;
+
+    final lower = text.toLowerCase();
+    EasterEggEffect? effect;
+    CanvasEnvironment? env;
+    if (lower.contains('rain')) {
+      effect = EasterEggEffect.rain;
+    } else if (lower.contains('done'))
+      effect = EasterEggEffect.done;
+    else if (lower.contains('fire')) {
+      effect = EasterEggEffect.fire;
+      env = CanvasEnvironment.warm;
+    } else if (lower.contains('snow')) {
+      effect = EasterEggEffect.snow;
+      env = CanvasEnvironment.frozen;
+    } else if (lower.contains('love') || lower.contains('❤️')) {
+      effect = EasterEggEffect.love;
+    } else if (lower.contains('black hole') || lower.contains('blackhole')) {
+      effect = EasterEggEffect.blackHole;
+    } else if (lower.contains('clear')) {
+      env = CanvasEnvironment.normal; // typing "clear" resets env
+    }
+
+    if (effect != null || env != null) {
+      if (effect != null && effect != EasterEggEffect.none) {
+        ref.read(gamificationProvider.notifier).unlockAchievement(effect.name);
+      }
+      state = state.copyWith(
+        activeEffect: effect ?? state.activeEffect,
+        effectTriggerTime: effect != null
+            ? DateTime.now()
+            : state.effectTriggerTime,
+        canvasEnvironment: env ?? state.canvasEnvironment,
+      );
+    }
+  }
+
+  void triggerEasterEgg(String effectName) {
+    _checkEasterEggs(effectName);
+  }
+
+  void transformSelection(double dx, double dy, double scale, double rotation) {
+    if (state.selectedStrokes.isEmpty || state.selectionBounds == null) return;
+
+    final center = state.selectionBounds!.center;
+    final List<Stroke> transformed = [];
+
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+
+    for (var stroke in state.selectedStrokes) {
+      final newPoints = stroke.points.map((p) {
+        double translatedX = p.dx - center.dx;
+        double translatedY = p.dy - center.dy;
+
+        if (rotation != 0.0) {
+          final double cosR = math.cos(rotation);
+          final double sinR = math.sin(rotation);
+          final double rx = translatedX * cosR - translatedY * sinR;
+          final double ry = translatedX * sinR + translatedY * cosR;
+          translatedX = rx;
+          translatedY = ry;
+        }
+
+        if (scale != 1.0) {
+          translatedX *= scale;
+          translatedY *= scale;
+        }
+
+        translatedX += center.dx + dx;
+        translatedY += center.dy + dy;
+
+        if (translatedX < minX) minX = translatedX;
+        if (translatedY < minY) minY = translatedY;
+        if (translatedX > maxX) maxX = translatedX;
+        if (translatedY > maxY) maxY = translatedY;
+
+        return Offset(translatedX, translatedY);
+      }).toList();
+
+      final newStroke = Stroke(
+        points: newPoints,
+        color: stroke.color,
+        size: stroke.size * scale,
+        rotation: stroke.rotation + rotation,
+        toolType: stroke.toolType,
+        text: stroke.text,
+        imageBytes: stroke.imageBytes,
+        decodedImage: stroke.decodedImage,
+      );
+
+      final bounds = newStroke.bounds;
+      if (bounds.left < minX) minX = bounds.left;
+      if (bounds.top < minY) minY = bounds.top;
+      if (bounds.right > maxX) maxX = bounds.right;
+      if (bounds.bottom > maxY) maxY = bounds.bottom;
+
+      transformed.add(newStroke);
+    }
+
+    state = state.copyWith(
+      selectionBounds: Rect.fromLTRB(minX, minY, maxX, maxY),
+      previewTransformedStrokes: transformed,
+    );
+  }
+
+  void deleteSelection() {
+    if (state.selectedStrokes.isEmpty) return;
+    final remaining = state.strokes
+        .where((s) => !state.selectedStrokes.contains(s))
+        .toList();
+    state = state.copyWith(
+      strokes: remaining,
+      clearSelection: true,
+      clearPreview: true,
+    );
+  }
+
+  void duplicateSelection() {
+    if (state.selectedStrokes.isEmpty) return;
+
+    // Create duplicated strokes offset by 20 pixels
+    final List<Stroke> duplicates = state.selectedStrokes.map((s) {
+      return Stroke(
+        points: s.points.map((p) => Offset(p.dx + 20, p.dy + 20)).toList(),
+        color: s.color,
+        size: s.size,
+        toolType: s.toolType,
+        text: s.text,
+        decodedImage: s.decodedImage,
+        imageBytes: s.imageBytes,
+      );
+    }).toList();
+
+    state = state.copyWith(
+      strokes: [...state.strokes, ...duplicates],
+      selectedStrokes: duplicates, // Select the new duplicates
+      clearPreview: true,
+      selectionBounds: state.selectionBounds?.translate(20, 20),
+    );
+  }
+
+  void commitSelectionTransform() {
+    if (state.previewTransformedStrokes == null ||
+        state.selectedStrokes.isEmpty) {
+      return;
+    }
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    final List<Stroke> newStrokes = List.from(state.strokes);
+    for (int i = 0; i < state.selectedStrokes.length; i++) {
+      final oldStroke = state.selectedStrokes[i];
+      final newStroke = state.previewTransformedStrokes![i];
+      final idx = newStrokes.indexOf(oldStroke);
+      if (idx != -1) {
+        newStrokes[idx] = newStroke;
+      }
+    }
+
+    state = state.copyWith(
+      strokes: newStrokes,
+      selectedStrokes: state.previewTransformedStrokes!,
+      clearPreview: true,
+      undoHistory: newUndoHistory,
+      redoHistory: [],
+    );
+  }
+
+  void startStroke(Offset position) {
+    // Save state BEFORE starting a new stroke for Undo purposes
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    state = state.copyWith(
+      undoHistory: newUndoHistory,
+      redoHistory: [], // Clear redo history on new stroke
+    );
+
+    _currentStroke = Stroke(
+      points: [position],
+      color: state.currentTool == ToolType.eraser
+          ? Colors.transparent
+          : state.currentColor,
+      size: state.currentSize,
+      toolType: state.currentTool,
+      isFilled: state.currentTool == ToolType.fill,
+    );
+    state = state.copyWith(strokes: [...state.strokes, _currentStroke!]);
+
+    SoundEngine.instance.startDrawing();
+  }
+
+  void updateStroke(Offset position) {
+    if (_currentStroke == null) return;
+
+    // Create a new list of points for the current stroke
+    final updatedPoints = List<Offset>.from(_currentStroke!.points)
+      ..add(position);
+
+    // Create an updated stroke
+    final updatedStroke = Stroke(
+      points: updatedPoints,
+      color: _currentStroke!.color,
+      size: _currentStroke!.size,
+      toolType: _currentStroke!.toolType,
+      isFilled: _currentStroke!.isFilled,
+    );
+
+    _currentStroke = updatedStroke;
+
+    // Calculate speed for sound engine
+    final lastPoint = _currentStroke!.points[_currentStroke!.points.length - 2];
+    final currentPoint = position;
+    final dist = (currentPoint - lastPoint).distance;
+    SoundEngine.instance.updateDrawingSpeed(dist);
+
+    // Update the state with the new stroke replacing the old one
+    final updatedStrokes = List<Stroke>.from(state.strokes);
+    updatedStrokes[updatedStrokes.length - 1] = updatedStroke;
+
+    state = state.copyWith(strokes: updatedStrokes);
+  }
+
+  void endStroke() {
+    SoundEngine.instance.stopDrawing();
+
+    if (_currentStroke != null && _currentStroke!.points.isNotEmpty) {
+      if (state.currentTool == ToolType.fill &&
+          _currentStroke!.points.length < 5) {
+        // It was a tap! Execute bucket fill logic
+        final tapPoint = _currentStroke!.points.first;
+        // Remove the tiny dot stroke we just added during the tap
+        final newStrokes = List<Stroke>.from(state.strokes)..removeLast();
+        state = state.copyWith(strokes: newStrokes);
+
+        _executeBucketFill(tapPoint);
+        _currentStroke = null;
+        return;
+      }
+
+      // Calculate Bounds
+      double minX = double.infinity, minY = double.infinity;
+      double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+      for (var p in _currentStroke!.points) {
+        if (p.dx < minX) minX = p.dx;
+        if (p.dy < minY) minY = p.dy;
+        if (p.dx > maxX) maxX = p.dx;
+        if (p.dy > maxY) maxY = p.dy;
+      }
+      Rect currentBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
+
+      // Auto-correct shapes if in discovery mode
+      if (state.easterEggMode == EasterEggMode.discovery) {
+        final shapeType = ShapeRecognizer.recognize(_currentStroke!.points);
+        if (shapeType != ShapeType.unknown) {
+          // Hybrid Combo Check: Black Hole
+          bool triggeredBlackHole = false;
+          if (shapeType == ShapeType.spiral &&
+              state.lastDetectedShape == ShapeType.circle &&
+              state.lastDetectedShapeBounds != null) {
+            // Check if spiral is inside circle bounds
+            if (state.lastDetectedShapeBounds!.overlaps(currentBounds)) {
+              triggeredBlackHole = true;
+            }
+          }
+
+          if (triggeredBlackHole) {
+            ref
+                .read(gamificationProvider.notifier)
+                .unlockAchievement('black_hole');
+            state = state.copyWith(
+              activeEffect: EasterEggEffect.blackHole, // We need to add this
+              effectTriggerTime: DateTime.now(),
+              lastDetectedShape: null,
+            );
+          } else {
+            // Normal Autocorrect
+            final perfectPoints = ShapeRecognizer.generatePerfectShape(
+              shapeType,
+              _currentStroke!.points,
+            );
+            final updatedStroke = Stroke(
+              points: perfectPoints,
+              color: _currentStroke!.color,
+              size: _currentStroke!.size,
+              toolType: _currentStroke!.toolType,
+            );
+            _currentStroke = updatedStroke;
+            final updatedStrokes = List<Stroke>.from(state.strokes);
+            updatedStrokes[updatedStrokes.length - 1] = updatedStroke;
+
+            state = state.copyWith(
+              strokes: updatedStrokes,
+              activeEffect: EasterEggEffect.none,
+              effectTriggerTime: DateTime.now(),
+              lastDetectedShape: shapeType,
+              lastDetectedShapeBounds: currentBounds,
+            );
+
+            ref.read(gamificationProvider.notifier).addXp(20);
+            ref
+                .read(gamificationProvider.notifier)
+                .unlockAchievement('shape_master');
+          }
+        }
+      }
+
+      ref.read(gamificationProvider.notifier).addXp(5);
+
+      if (maxX != double.negativeInfinity) {
+        state = state.copyWith(lastAddedBounds: currentBounds);
+      }
+    }
+    _currentStroke = null;
+  }
+
+  void _executeBucketFill(Offset point) {
+    // Search from top to bottom (reverse order) so we fill the front-most shape
+    for (int i = state.strokes.length - 1; i >= 0; i--) {
+      final stroke = state.strokes[i];
+      if (stroke.points.isEmpty ||
+          stroke.toolType == ToolType.latex ||
+          stroke.toolType == ToolType.widget) {
+        continue;
+      }
+
+      if (stroke.path.contains(point)) {
+        final filledStroke = Stroke(
+          points: stroke.points,
+          color: state.currentColor,
+          size: stroke.size,
+          rotation: stroke.rotation,
+          toolType: ToolType.pen,
+          text: stroke.text,
+          imageBytes: stroke.imageBytes,
+          decodedImage: stroke.decodedImage,
+          isFilled: true,
+        );
+
+        final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+          ..add(List.from(state.strokes));
+        final newStrokes = List<Stroke>.from(state.strokes);
+        newStrokes.insert(i, filledStroke);
+
+        state = state.copyWith(
+          strokes: newStrokes,
+          undoHistory: newUndoHistory,
+          redoHistory: [],
+        );
+        return;
+      }
+    }
+  }
+
+  void undo() {
+    if (state.undoHistory.isEmpty) return;
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory);
+    final previousStrokes = newUndoHistory
+        .removeLast(); // Get the state before the last stroke
+
+    final newRedoHistory = List<List<Stroke>>.from(state.redoHistory)
+      ..add(List.from(state.strokes)); // Save current state to redo
+
+    state = state.copyWith(
+      strokes: previousStrokes,
+      undoHistory: newUndoHistory,
+      redoHistory: newRedoHistory,
+    );
+  }
+
+  void redo() {
+    if (state.redoHistory.isEmpty) return;
+
+    final newRedoHistory = List<List<Stroke>>.from(state.redoHistory);
+    final nextStrokes = newRedoHistory.removeLast();
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    state = state.copyWith(
+      strokes: nextStrokes,
+      undoHistory: newUndoHistory,
+      redoHistory: newRedoHistory,
+    );
+  }
+
+  void clear() {
+    if (state.strokes.isNotEmpty) {
+      final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+        ..add(List.from(state.strokes));
+
+      state = state.copyWith(
+        strokes: [],
+        undoHistory: newUndoHistory,
+        redoHistory: [],
+      );
+    }
+  }
+
+  void eraseRect(Rect rect) {
+    if (state.strokes.isEmpty) return;
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    final newStrokes = state.strokes.where((stroke) {
+      if (stroke.text != null) {
+        return !rect.contains(stroke.points.first);
+      }
+      return !stroke.points.any((p) => rect.contains(p));
+    }).toList();
+
+    state = state.copyWith(
+      strokes: newStrokes,
+      undoHistory: newUndoHistory,
+      redoHistory: [],
+    );
+  }
+
+  void eraseText(String textToErase) {
+    if (state.strokes.isEmpty) return;
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    final lowercased = textToErase.toLowerCase();
+    final newStrokes = state.strokes.where((stroke) {
+      if (stroke.text != null) {
+        return !stroke.text!.toLowerCase().contains(lowercased);
+      }
+      return true;
+    }).toList();
+
+    state = state.copyWith(
+      strokes: newStrokes,
+      undoHistory: newUndoHistory,
+      redoHistory: [],
+    );
+  }
+
+  void eraseStrokes(List<Stroke> strokesToRemove) {
+    if (strokesToRemove.isEmpty) return;
+
+    // Save state BEFORE erasing for Undo purposes
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    final newStrokes = List<Stroke>.from(state.strokes)
+      ..removeWhere((s) => strokesToRemove.contains(s));
+
+    state = state.copyWith(
+      strokes: newStrokes,
+      undoHistory: newUndoHistory,
+      redoHistory: [],
+    );
+  }
+
+  void loadStrokes(List<Stroke> strokes) async {
+    state = state.copyWith(strokes: strokes, undoHistory: [], redoHistory: []);
+    // Decode any images in the loaded strokes asynchronously
+    bool updated = false;
+    for (var stroke in strokes) {
+      if (stroke.imageBytes != null && stroke.decodedImage == null) {
+        final decoded = await decodeImageFromList(stroke.imageBytes!);
+        stroke.decodedImage = decoded;
+        updated = true;
+      }
+    }
+    if (updated) {
+      // Force repaint by assigning a new list
+      state = state.copyWith(strokes: List.from(strokes));
+    }
+  }
+
+  Future<void> insertImage(Uint8List bytes, Offset position) async {
+    // Decode the image first to check its natural size
+    ui.Image decodedImage = await decodeImageFromList(bytes);
+
+    // Scale down huge images to prevent them from taking up the entire infinite canvas
+    if (decodedImage.width > 800 || decodedImage.height > 800) {
+      int targetWidth = decodedImage.width;
+      int targetHeight = decodedImage.height;
+
+      if (decodedImage.width > decodedImage.height) {
+        targetWidth = 800;
+        targetHeight = (800 / decodedImage.width * decodedImage.height).round();
+      } else {
+        targetHeight = 800;
+        targetWidth = (800 / decodedImage.height * decodedImage.width).round();
+      }
+
+      final codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: targetWidth,
+        targetHeight: targetHeight,
+      );
+      final frame = await codec.getNextFrame();
+      decodedImage = frame.image;
+    }
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    if (state.easterEggMode != EasterEggMode.focus) {
+      // Bouncy Paste Animation!
+      state = state.copyWith(
+        strokes: [
+          ...state.strokes,
+          Stroke(
+            points: [position],
+            color: Colors.transparent,
+            size: 0.1,
+            toolType: ToolType.pan,
+            imageBytes: bytes,
+            decodedImage: decodedImage,
+          ),
+        ],
+        undoHistory: newUndoHistory,
+        redoHistory: [],
+        lastAddedBounds: Rect.fromLTWH(
+          position.dx,
+          position.dy,
+          decodedImage.width.toDouble(),
+          decodedImage.height.toDouble(),
+        ),
+      );
+
+      final scales = [0.2, 0.5, 0.9, 1.15, 0.95, 1.05, 1.0];
+      for (var s in scales) {
+        await Future.delayed(const Duration(milliseconds: 24));
+        final updatedStrokes = List<Stroke>.from(state.strokes);
+        updatedStrokes.last = Stroke(
+          points: [position],
+          color: Colors.transparent,
+          size: s,
+          toolType: ToolType.pan,
+          imageBytes: bytes,
+          decodedImage: decodedImage,
+        );
+        state = state.copyWith(strokes: updatedStrokes);
+      }
+    } else {
+      final imageStroke = Stroke(
+        points: [position],
+        color: Colors.transparent,
+        size: 1.0,
+        toolType: ToolType.pan,
+        imageBytes: bytes,
+        decodedImage: decodedImage,
+      );
+
+      state = state.copyWith(
+        strokes: [...state.strokes, imageStroke],
+        undoHistory: newUndoHistory,
+        redoHistory: [],
+        lastAddedBounds: Rect.fromLTWH(
+          position.dx,
+          position.dy,
+          decodedImage.width.toDouble(),
+          decodedImage.height.toDouble(),
+        ),
+      );
+    }
+  }
+
+  void addStrokes(List<Stroke> newStrokes) {
+    if (newStrokes.isEmpty) return;
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    state = state.copyWith(
+      strokes: [...state.strokes, ...newStrokes],
+      undoHistory: newUndoHistory,
+      redoHistory: [],
+    );
+  }
+
+  void moveLastStrokes(int count, Offset offset) {
+    if (state.strokes.isEmpty || count <= 0) return;
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    final newStrokes = List<Stroke>.from(state.strokes);
+    final countToMove = count.clamp(0, newStrokes.length);
+
+    for (int i = newStrokes.length - countToMove; i < newStrokes.length; i++) {
+      final stroke = newStrokes[i];
+      final newPoints = stroke.points.map((p) => p + offset).toList();
+
+      // Need a way to copy with new points. Since Stroke doesn't have copyWith, we create a new one.
+      newStrokes[i] = Stroke(
+        points: newPoints,
+        color: stroke.color,
+        size: stroke.size,
+        rotation: stroke.rotation,
+        toolType: stroke.toolType,
+        imageBytes: stroke.imageBytes,
+        decodedImage: stroke.decodedImage,
+        text: stroke.text,
+      );
+    }
+
+    state = state.copyWith(
+      strokes: newStrokes,
+      undoHistory: newUndoHistory,
+      redoHistory: [],
+    );
+  }
+
+  void transformStrokesInRect(
+    Rect bounds, {
+    double dx = 0,
+    double dy = 0,
+    double scale = 1.0,
+    double rotation = 0.0,
+  }) {
+    if (state.strokes.isEmpty) return;
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+    final newStrokes = List<Stroke>.from(state.strokes);
+
+    bool madeChanges = false;
+
+    for (int i = 0; i < newStrokes.length; i++) {
+      final stroke = newStrokes[i];
+
+      final bounds = stroke.bounds;
+      final sMinX = bounds.left;
+      final sMinY = bounds.top;
+      final sMaxX = bounds.right;
+      final sMaxY = bounds.bottom;
+
+      // Pad the stroke bounds slightly to make selection forgiving
+      final strokeRect = Rect.fromLTRB(
+        sMinX - 10,
+        sMinY - 10,
+        sMaxX + 10,
+        sMaxY + 10,
+      );
+      bool intersects = strokeRect.overlaps(bounds);
+
+      if (intersects) {
+        madeChanges = true;
+        // Find center of the stroke for rotation/scaling
+        final center = Offset((sMinX + sMaxX) / 2, (sMinY + sMaxY) / 2);
+
+        final newPoints = stroke.points.map((p) {
+          double translatedX = p.dx - center.dx;
+          double translatedY = p.dy - center.dy;
+
+          if (rotation != 0.0) {
+            final double cosR = math.cos(rotation);
+            final double sinR = math.sin(rotation);
+            final double rx = translatedX * cosR - translatedY * sinR;
+            final double ry = translatedX * sinR + translatedY * cosR;
+            translatedX = rx;
+            translatedY = ry;
+          }
+
+          if (scale != 1.0) {
+            translatedX *= scale;
+            translatedY *= scale;
+          }
+
+          return Offset(
+            translatedX + center.dx + dx,
+            translatedY + center.dy + dy,
+          );
+        }).toList();
+
+        newStrokes[i] = Stroke(
+          points: newPoints,
+          color: stroke.color,
+          size: stroke.size * scale,
+          toolType: stroke.toolType,
+          imageBytes: stroke.imageBytes,
+          decodedImage: stroke.decodedImage,
+          text: stroke.text,
+        );
+      }
+    }
+
+    if (madeChanges) {
+      state = state.copyWith(
+        strokes: newStrokes,
+        undoHistory: newUndoHistory,
+        redoHistory: [],
+      );
+    }
+  }
+
+  Future<void> tweenStrokes(
+    List<TweenData> tweens, {
+    int durationMs = 1000,
+  }) async {
+    if (state.strokes.isEmpty || tweens.isEmpty) return;
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    // For each tween, find matching strokes
+    // Store which stroke maps to which TweenData
+    Map<int, int> strokeToTweenIndex = {};
+    List<Stroke> originalTargetStrokes = [];
+    List<Offset> strokeCenters = [];
+    List<int> targetStrokeIndices = [];
+
+    for (int t = 0; t < tweens.length; t++) {
+      final tweenBounds = tweens[t].bounds;
+
+      for (int i = 0; i < state.strokes.length; i++) {
+        // Skip if already assigned to a tween to prevent double-transforming
+        if (strokeToTweenIndex.containsKey(i)) continue;
+
+        final stroke = state.strokes[i];
+
+        final sBounds = stroke.bounds;
+        final sMinX = sBounds.left;
+        final sMinY = sBounds.top;
+        final sMaxX = sBounds.right;
+        final sMaxY = sBounds.bottom;
+
+        final strokeRect = Rect.fromLTRB(
+          sMinX - 10,
+          sMinY - 10,
+          sMaxX + 10,
+          sMaxY + 10,
+        );
+
+        if (strokeRect.overlaps(tweenBounds)) {
+          strokeToTweenIndex[i] = t;
+          targetStrokeIndices.add(i);
+          originalTargetStrokes.add(stroke);
+          strokeCenters.add(Offset((sMinX + sMaxX) / 2, (sMinY + sMaxY) / 2));
+        }
+      }
+    }
+
+    if (targetStrokeIndices.isEmpty) return;
+
+    // 2. Run the tween loop at 60 FPS
+    final int frames = (durationMs / 16).ceil();
+    if (frames <= 0) return;
+
+    for (int frame = 1; frame <= frames; frame++) {
+      final double progress = frame / frames;
+
+      // Quadratic Easing (EaseInOut)
+      final double easedProgress = progress < 0.5
+          ? 2 * progress * progress
+          : 1 - math.pow(-2 * progress + 2, 2) / 2;
+
+      final currentStrokes = List<Stroke>.from(state.strokes);
+
+      for (int i = 0; i < targetStrokeIndices.length; i++) {
+        final strokeIdx = targetStrokeIndices[i];
+        final tweenIdx = strokeToTweenIndex[strokeIdx]!;
+        final tween = tweens[tweenIdx];
+
+        final currentDx = tween.dx * easedProgress;
+        final currentDy = tween.dy * easedProgress;
+        final currentScale = 1.0 + (tween.scale - 1.0) * easedProgress;
+        final currentRotation = tween.rotation * easedProgress;
+
+        final originalStroke = originalTargetStrokes[i];
+        final center = strokeCenters[i];
+
+        final newPoints = originalStroke.points.map((p) {
+          double translatedX = p.dx - center.dx;
+          double translatedY = p.dy - center.dy;
+
+          if (currentRotation != 0.0) {
+            final double cosR = math.cos(currentRotation);
+            final double sinR = math.sin(currentRotation);
+            final double rx = translatedX * cosR - translatedY * sinR;
+            final double ry = translatedX * sinR + translatedY * cosR;
+            translatedX = rx;
+            translatedY = ry;
+          }
+
+          if (currentScale != 1.0) {
+            translatedX *= currentScale;
+            translatedY *= currentScale;
+          }
+
+          return Offset(
+            translatedX + center.dx + currentDx,
+            translatedY + center.dy + currentDy,
+          );
+        }).toList();
+
+        currentStrokes[strokeIdx] = Stroke(
+          points: newPoints,
+          color: originalStroke.color,
+          size: originalStroke.size * currentScale,
+          rotation: originalStroke.rotation + currentRotation,
+          toolType: originalStroke.toolType,
+          imageBytes: originalStroke.imageBytes,
+          decodedImage: originalStroke.decodedImage,
+          text: originalStroke.text,
+        );
+      }
+
+      state = state.copyWith(strokes: currentStrokes, redoHistory: []);
+      await Future.delayed(const Duration(milliseconds: 16));
+    }
+
+    // Finally save to undo history
+    state = state.copyWith(undoHistory: newUndoHistory);
+  }
+
+  void removeStrokes(List<Stroke> strokesToRemove) {
+    if (strokesToRemove.isEmpty) return;
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+
+    final currentStrokes = List<Stroke>.from(state.strokes);
+    currentStrokes.removeWhere((s) => strokesToRemove.contains(s));
+
+    state = state.copyWith(
+      strokes: currentStrokes,
+      undoHistory: newUndoHistory,
+      redoHistory: [],
+    );
+  }
+
+  Future<void> animateStrokes(List<Stroke> newStrokes) async {
+    if (newStrokes.isEmpty) return;
+
+    // Create a copy of the list and sort it from top to bottom (Y coordinate)
+    // This ensures the animation feels like someone writing naturally down a page!
+    final sortedStrokes = List<Stroke>.from(newStrokes);
+    sortedStrokes.sort((a, b) {
+      final aY = a.points.isNotEmpty ? a.points.first.dy : 0.0;
+      final bY = b.points.isNotEmpty ? b.points.first.dy : 0.0;
+      return aY.compareTo(bY);
+    });
+
+    for (var stroke in sortedStrokes) {
+      if (stroke.points.isEmpty) continue;
+
+      final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+        ..add(List.from(state.strokes));
+
+      if (stroke.text != null && stroke.toolType != ToolType.latex) {
+        final fullText = stroke.text!;
+        _checkEasterEggs(fullText);
+
+        // If it's a short text/emoji, do a bouncy scale-in pop animation!
+        if (fullText.length <= 3) {
+          final targetSize = stroke.size;
+
+          state = state.copyWith(
+            strokes: [
+              ...state.strokes,
+              Stroke(
+                points: stroke.points,
+                color: stroke.color,
+                size: 0.1,
+                rotation: stroke.rotation,
+                toolType: stroke.toolType,
+                text: fullText,
+              ),
+            ],
+            undoHistory: newUndoHistory,
+            redoHistory: [],
+          );
+
+          final scales = [0.2, 0.5, 0.8, 1.2, 1.1, 0.95, 1.0];
+          for (var s in scales) {
+            await Future.delayed(const Duration(milliseconds: 30));
+            _currentStroke = Stroke(
+              points: stroke.points,
+              color: stroke.color,
+              size: targetSize * s,
+              rotation: stroke.rotation,
+              toolType: stroke.toolType,
+              text: fullText,
+            );
+
+            final updatedStrokes = List<Stroke>.from(state.strokes);
+            updatedStrokes.last = _currentStroke!;
+            state = state.copyWith(strokes: updatedStrokes);
+          }
+        } else {
+          // Typewriter animation for normal text
+          final initialStroke = Stroke(
+            points: stroke.points,
+            color: stroke.color,
+            size: stroke.size,
+            toolType: stroke.toolType,
+            text: "", // Start empty
+          );
+          state = state.copyWith(
+            strokes: [...state.strokes, initialStroke],
+            undoHistory: newUndoHistory,
+            redoHistory: [],
+          );
+
+          // Animate text much faster by chunking characters based on text length
+          // We want it to finish in roughly 800ms
+          final totalFrames = 800 ~/ 16; // approx 50 frames
+          final charsPerStep = (fullText.length / totalFrames).ceil().clamp(
+            1,
+            20,
+          );
+
+          for (int i = 1; i <= fullText.length; i += charsPerStep) {
+            await Future.delayed(const Duration(milliseconds: 16));
+
+            int endIndex = i + charsPerStep;
+            if (endIndex > fullText.length) endIndex = fullText.length;
+
+            _currentStroke = Stroke(
+              points: stroke.points,
+              color: stroke.color,
+              size: stroke.size,
+              toolType: stroke.toolType,
+              text: fullText.substring(0, endIndex),
+            );
+
+            final updatedStrokes = List<Stroke>.from(state.strokes);
+            updatedStrokes.last = _currentStroke!;
+            state = state.copyWith(strokes: updatedStrokes);
+          }
+        }
+      } else {
+        // Instant appearance for LaTeX, or Smooth Line drawing for geometric shapes
+        if (stroke.toolType == ToolType.latex) {
+          state = state.copyWith(
+            strokes: [...state.strokes, stroke],
+            undoHistory: newUndoHistory,
+            redoHistory: [],
+          );
+          // Wait longer so it feels like they are deliberately solving and writing equations
+          await Future.delayed(const Duration(milliseconds: 800));
+          continue;
+        }
+
+        _currentStroke = Stroke(
+          points: [stroke.points.first],
+          color: stroke.color,
+          size: stroke.size,
+          toolType: stroke.toolType,
+        );
+
+        state = state.copyWith(
+          strokes: [...state.strokes, _currentStroke!],
+          undoHistory: newUndoHistory,
+          redoHistory: [],
+        );
+
+        // Interpolate points if it's a sparse geometric shape so it draws smoothly like being traced
+        List<Offset> densePoints = [];
+        if (stroke.points.length > 1 && stroke.points.length < 20) {
+          for (int i = 0; i < stroke.points.length - 1; i++) {
+            final p1 = stroke.points[i];
+            final p2 = stroke.points[i + 1];
+            final distance = (p2 - p1).distance;
+            // Add a point every ~3 pixels for smooth animation
+            final numSteps = (distance / 3.0).ceil().clamp(1, 1000);
+            for (int step = 0; step < numSteps; step++) {
+              densePoints.add(Offset.lerp(p1, p2, step / numSteps)!);
+            }
+          }
+          densePoints.add(stroke.points.last);
+        } else {
+          densePoints = stroke.points;
+        }
+
+        final totalPoints = densePoints.length;
+
+        if (totalPoints > 1) {
+          // Use a Ticker for frame-bound, smooth 60fps animation
+          final completer = Completer<void>();
+          int currentIndex = 1;
+
+          // Slower drawing speed to emphasize the animation
+          // This scales with the number of points so small shapes finish quickly and massive shapes take longer, up to ~2-3 seconds max.
+          final ptsPerFrame = (totalPoints / 120.0).ceil().clamp(2, 10);
+
+          late Ticker ticker;
+          ticker = Ticker((elapsed) {
+            currentIndex += ptsPerFrame;
+            if (currentIndex >= totalPoints) {
+              currentIndex = totalPoints;
+              ticker.stop();
+              ticker.dispose();
+              if (!completer.isCompleted) completer.complete();
+            }
+
+            _currentStroke = Stroke(
+              points: densePoints.sublist(0, currentIndex),
+              color: stroke.color,
+              size: stroke.size,
+              toolType: stroke.toolType,
+              text: stroke.text,
+            );
+
+            final updatedStrokes = List<Stroke>.from(state.strokes);
+            updatedStrokes.last = _currentStroke!;
+            state = state.copyWith(strokes: updatedStrokes);
+          });
+
+          ticker.start();
+          await completer.future;
+        }
+      }
+
+      _currentStroke = null;
+    }
+  }
+
+  void setTool(ToolType tool) {
+    if (tool != ToolType.select) {
+      clearSelection();
+    }
+    state = state.copyWith(currentTool: tool);
+  }
+
+  void setColor(Color color) {
+    state = state.copyWith(currentColor: color);
+  }
+
+  void setSize(double size) {
+    state = state.copyWith(currentSize: size);
+  }
+
+  void setLastAddedBounds(Rect? bounds) {
+    state = state.copyWith(lastAddedBounds: bounds);
+  }
+
+  void setCanvasBackgroundColor(Color color) {
+    state = state.copyWith(canvasBackgroundColor: color);
+  }
+
+  void setAiStatus(String? status) {
+    if (status == null) {
+      state = state.copyWith(clearAiStatus: true);
+    } else {
+      state = state.copyWith(aiStatus: status);
+    }
+  }
+
+  void _pushUndo() {
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory);
+    newUndoHistory.add(List.from(state.strokes));
+    if (newUndoHistory.length > 50) newUndoHistory.removeAt(0);
+    state = state.copyWith(undoHistory: newUndoHistory, redoHistory: []);
+  }
+
+  int updateStrokeById(String id, Stroke Function(Stroke) updater) {
+    _pushUndo();
+    int count = 0;
+    final newStrokes = state.strokes.map((s) {
+      if (s.id == id) {
+        count++;
+        return updater(s);
+      }
+      return s;
+    }).toList();
+    if (count > 0) state = state.copyWith(strokes: newStrokes);
+    return count;
+  }
+
+  int updateStrokesByGroupId(String groupId, Stroke Function(Stroke) updater) {
+    _pushUndo();
+    int count = 0;
+    final newStrokes = state.strokes.map((s) {
+      if (s.groupId == groupId) {
+        count++;
+        return updater(s);
+      }
+      return s;
+    }).toList();
+    if (count > 0) state = state.copyWith(strokes: newStrokes);
+    return count;
+  }
+
+  int replaceStrokeById(String id, Stroke newStroke) {
+    _pushUndo();
+    int count = 0;
+    final newStrokes = state.strokes.map((s) {
+      if (s.id == id) {
+        count++;
+        return newStroke;
+      }
+      return s;
+    }).toList();
+    if (count > 0) state = state.copyWith(strokes: newStrokes);
+    return count;
+  }
+
+  int removeStrokesByIds(List<String> targetIds) {
+    _pushUndo();
+    final initialLength = state.strokes.length;
+    final newStrokes = state.strokes.where((s) {
+      return !targetIds.contains(s.id) &&
+          !targetIds.contains(s.groupId) &&
+          !targetIds.contains(s.name);
+    }).toList();
+    final count = initialLength - newStrokes.length;
+    if (count > 0) state = state.copyWith(strokes: newStrokes);
+    return count;
+  }
+
+  int tagStrokes(List<String> ids, String tag) {
+    _pushUndo();
+    int count = 0;
+    final newStrokes = state.strokes.map((s) {
+      if (ids.contains(s.id)) {
+        count++;
+        return s.copyWith(groupId: tag, name: tag);
+      }
+      return s;
+    }).toList();
+    if (count > 0) state = state.copyWith(strokes: newStrokes);
+    return count;
+  }
+}
+
+final drawingProvider = NotifierProvider<DrawingNotifier, DrawingState>(
+  DrawingNotifier.new,
+);

@@ -67,15 +67,16 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       final screenSize = MediaQuery.of(context).size;
       final currentTransform = widget.getTransform?.call();
 
-      // We do NOT pass canvasSize here. Passing canvasSize forces a full-screen 4K image export
-      // which causes massive API latency. We only need the cropped strokes image for visual context!
-      final imageBytes = await CanvasExporter.exportStrokesToImage(
-        strokes,
-        transform: currentTransform,
-      );
-
       final transform = currentTransform ?? Matrix4.identity();
       final scale = transform.getMaxScaleOnAxis();
+      final pixelRatio = 1.0;
+
+      final imageBytes = await CanvasExporter.exportStrokesToImage(
+        strokes,
+        canvasSize: screenSize,
+        transform: transform,
+        pixelRatio: pixelRatio,
+      );
 
       double minX = double.infinity, minY = double.infinity;
       double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
@@ -115,10 +116,10 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       Offset? canvasTargetCenter;
       
       if (minX != double.infinity) {
-        final scaledMinX = (minX * 2.0).toInt();
-        final scaledMinY = (minY * 2.0).toInt();
-        final scaledMaxX = (maxX * 2.0).toInt();
-        final scaledMaxY = (maxY * 2.0).toInt();
+        final scaledMinX = (minX * pixelRatio).toInt();
+        final scaledMinY = (minY * pixelRatio).toInt();
+        final scaledMaxX = (maxX * pixelRatio).toInt();
+        final scaledMaxY = (maxY * pixelRatio).toInt();
 
         // Calculate target insertion coordinates
         double targetX = (minX + maxX) / 2.0;
@@ -133,7 +134,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           case 'Center': targetX = screenSize.width / 2.0; targetY = screenSize.height / 2.0; break;
         }
         
-        final inverse = Matrix4.copy(currentTransform ?? Matrix4.identity())..invert();
+        final inverse = Matrix4.copy(transform)..invert();
         canvasTargetCenter = MatrixUtils.transformPoint(inverse, Offset(targetX, targetY));
         
         if (widget.onCameraFocusRequired != null) {
@@ -142,8 +143,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         
         drawingNotifier.setAiStatus('Thinking', target: canvasTargetCenter);
 
-        final targetXScaled = (targetX * 2.0).toInt();
-        final targetYScaled = (targetY * 2.0).toInt();
+        final targetXScaled = (targetX * pixelRatio).toInt();
+        final targetYScaled = (targetY * pixelRatio).toInt();
 
         final responseFormat = ref.read(settingsProvider).responseFormat;
 
@@ -159,7 +160,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         }
       } else {
         canvasTargetCenter = MatrixUtils.transformPoint(
-            Matrix4.copy(currentTransform ?? Matrix4.identity())..invert(),
+            Matrix4.copy(transform)..invert(),
             Offset(screenSize.width / 2.0, screenSize.height / 2.0));
             
         if (widget.onCameraFocusRequired != null) {
@@ -168,24 +169,25 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         drawingNotifier.setAiStatus('Thinking', target: canvasTargetCenter);
       }
 
-      final scaledWidth = (screenSize.width * 2.0).toInt();
-      final scaledHeight = (screenSize.height * 2.0).toInt();
+      final scaledWidth = (screenSize.width * pixelRatio).toInt();
+      final scaledHeight = (screenSize.height * pixelRatio).toInt();
 
       final augmentedPrompt = '''$text
 [System Note: The canvas image size you are analyzing is ${scaledWidth}x$scaledHeight. You must output your coordinates based on this exact ${scaledWidth}x$scaledHeight scale.]$inkBoundsStr''';
 
       final currentStrokes = ref.read(drawingProvider).strokes;
       final canvasObjects = currentStrokes.map((s) {
+        final screenRect = MatrixUtils.transformRect(transform, s.bounds);
         return {
           'id': s.id,
           'groupId': s.groupId,
           'name': s.name,
           'toolType': s.toolType.toString(),
           'bounds': [
-            s.bounds.left.toInt(),
-            s.bounds.top.toInt(),
-            s.bounds.width.toInt(),
-            s.bounds.height.toInt(),
+            (screenRect.left * pixelRatio).toInt(),
+            (screenRect.top * pixelRatio).toInt(),
+            (screenRect.width * pixelRatio).toInt(),
+            (screenRect.height * pixelRatio).toInt(),
           ],
         };
       }).toList();
@@ -393,9 +395,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     }
 
     Offset mapPoint(double x, double y) {
-      // Divide by pixelRatio = 2.0 used in CanvasExporter
-      final scaledX = x / 2.0;
-      final scaledY = y / 2.0;
+      // Divide by pixelRatio = 1.0 used in CanvasExporter
+      final scaledX = x / 1.0;
+      final scaledY = y / 1.0;
       final point = MatrixUtils.transformPoint(
         inverse,
         Offset(scaledX, scaledY),
@@ -421,13 +423,17 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             final colorHex = patch['color'] as String?;
             Color? patchColor;
             if (colorHex != null) {
-              if (colorHex.startsWith('#')) {
-                patchColor = Color(
-                  int.parse(colorHex.substring(1), radix: 16) + 0xFF000000,
-                );
-              } else {
-                patchColor = Color(int.parse(colorHex));
-              }
+              try {
+                if (colorHex.startsWith('#')) {
+                  patchColor = Color(
+                    int.parse(colorHex.substring(1), radix: 16) + 0xFF000000,
+                  );
+                } else if (colorHex.startsWith('0x') || colorHex.startsWith('0X')) {
+                  patchColor = Color(int.parse(colorHex.substring(2), radix: 16));
+                } else {
+                  patchColor = Color(int.parse(colorHex));
+                }
+              } catch (_) {}
             }
             final isFilled = patch['isFilled'] as bool?;
 
@@ -607,11 +613,35 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           tweens.add(TweenData(bounds, offset.dx, offset.dy, scale, rotation));
           continue;
         } else if (type == 'apply_gravity') {
+          final targetId = action['targetId'] as String?;
+          final targetGroupId = action['targetGroupId'] as String?;
           final scaleAxis = inverse.getMaxScaleOnAxis();
           final duration = 2000;
           if (duration > maxTweenDuration) maxTweenDuration = duration;
-          for (var stroke in ref.read(drawingProvider).strokes) {
-            final dy = (1000.0 / 2.0) * scaleAxis; // Large drop
+          
+          final currentStrokes = ref.read(drawingProvider).strokes;
+          Iterable<Stroke> targetStrokes = currentStrokes;
+          
+          if (targetId != null) {
+            targetStrokes = currentStrokes.where((s) => s.id == targetId);
+          } else if (targetGroupId != null) {
+            targetStrokes = currentStrokes.where((s) => s.groupId == targetGroupId);
+          } else {
+            // Apply to the most recently added group if no target is specified
+            if (currentStrokes.isNotEmpty) {
+              final lastGroupId = currentStrokes.last.groupId;
+              if (lastGroupId != null) {
+                targetStrokes = currentStrokes.where((s) => s.groupId == lastGroupId);
+              } else {
+                targetStrokes = [currentStrokes.last];
+              }
+            } else {
+              targetStrokes = [];
+            }
+          }
+          
+          for (var stroke in targetStrokes) {
+            final dy = (1000.0 / 1.0) * scaleAxis; // Large drop
             final offset =
                 MatrixUtils.transformPoint(inverse, Offset(0, dy)) -
                 MatrixUtils.transformPoint(inverse, Offset.zero);
@@ -628,6 +658,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             color = Color(
               int.parse(colorStr.substring(1), radix: 16) + 0xFF000000,
             );
+          } else if (colorStr.startsWith('0x') || colorStr.startsWith('0X')) {
+            color = Color(int.parse(colorStr.substring(2), radix: 16));
           } else {
             color = Color(int.parse(colorStr));
           }

@@ -92,7 +92,7 @@ class AiAgentService {
     final String systemInstruction =
         '''You are an agentic AI assistant inside a drawing app.
 You have the ability to draw and write directly on the user's canvas.
-$memorySection$liveContext$objectsContext
+$memorySection$historySection$liveContext$objectsContext
 
 CRITICAL INSTRUCTION: Your output MUST ALWAYS be a single JSON object in this exact format:
 ```json
@@ -124,7 +124,7 @@ Supported actions for the "ops" array:
 16. {"action": "update", "targetId": "s_123", "targetGroupId": "tree", "patch": {"color": "0xFF00FF00", "isFilled": true}}
 17. {"action": "remove", "targetId": "s_123", "targetGroupId": "tree"}
 18. {"action": "tag", "ids": ["s_1", "s_2"], "name": "house"}
-19. {"action": "apply_gravity"}
+19. {"action": "apply_gravity", "targetGroupId": "car"} (Optional: specify targetGroupId to apply gravity to a specific object)
 
 CRITICAL UML AND CHARTS RULE: If the user asks for a CHART, GRAPH, WIREFRAME, or MINDMAP, use the `insert_uml` action with valid PlantUML code.
 - Do NOT use `@startsalt` for tables! It looks like a terrible 1990s wireframe and the user hates it!

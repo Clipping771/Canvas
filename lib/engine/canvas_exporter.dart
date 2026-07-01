@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../models/stroke.dart';
+import 'drawing_painter.dart';
 
 class CanvasExporter {
   static Future<Uint8List?> exportStrokesToImage(
@@ -67,50 +68,9 @@ class CanvasExporter {
       canvas.translate(-offsetX, -offsetY);
     }
 
-    // Draw strokes
-    for (var stroke in strokes) {
-      if (stroke.points.isEmpty) continue;
-
-      final paint = Paint()
-        ..color = stroke.color
-        ..strokeWidth = stroke.size
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = PaintingStyle.stroke;
-
-      if (stroke.decodedImage != null) {
-        final imagePaint = Paint()..filterQuality = FilterQuality.high;
-        canvas.drawImage(stroke.decodedImage!, stroke.points.first, imagePaint);
-        continue;
-      }
-
-      if (stroke.text != null) {
-        final hasBengali = stroke.text!.codeUnits.any(
-          (c) => c >= 0x0980 && c <= 0x09FF,
-        );
-        final baseStyle = TextStyle(color: stroke.color, fontSize: stroke.size);
-
-        final textStyle = hasBengali
-            ? GoogleFonts.galada(textStyle: baseStyle)
-            : GoogleFonts.nanumPenScript(textStyle: baseStyle);
-
-        final textSpan = TextSpan(text: stroke.text, style: textStyle);
-        final textPainter = TextPainter(
-          text: textSpan,
-          textDirection: TextDirection.ltr,
-        );
-        textPainter.layout();
-        textPainter.paint(canvas, stroke.points.first);
-        continue;
-      }
-
-      final path = Path();
-      path.moveTo(stroke.points.first.dx, stroke.points.first.dy);
-      for (int i = 1; i < stroke.points.length; i++) {
-        path.lineTo(stroke.points[i].dx, stroke.points[i].dy);
-      }
-      canvas.drawPath(path, paint);
-    }
+    // Use the exact same painter as the UI to ensure 1:1 match
+    final painter = DrawingCanvasPainter(strokes: strokes);
+    painter.paint(canvas, Size(width.toDouble() / pixelRatio, height.toDouble() / pixelRatio));
 
     canvas.restore();
 

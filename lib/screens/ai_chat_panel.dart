@@ -346,8 +346,10 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
              final p = widget.getTransform != null 
                  ? MatrixUtils.transformPoint(Matrix4.copy(widget.getTransform!()!)..invert(), Offset(screenSize.width / 2.0 / 2.0, screenSize.height / 2.0 / 2.0))
                  : Offset(screenSize.width / 2.0, screenSize.height / 2.0);
+             final bgColor = drawingNotifier.state.canvasBackgroundColor ?? Colors.white;
+             final isBgDark = bgColor.computeLuminance() < 0.5;
              drawingNotifier.addStrokes([
-               AiStrokeGenerator.generateText(response, p.dx, p.dy, const Color(0xFF000000), 18.0 * 3.0)
+               AiStrokeGenerator.generateText(response, p.dx, p.dy, isBgDark ? Colors.white : Colors.black, 18.0 * 3.0)
              ]);
           }
         }
@@ -664,6 +666,16 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             color = Color(int.parse(colorStr));
           }
         } catch (_) {}
+
+        // --- ADAPTABILITY LOGIC ---
+        final bgColor = ref.read(drawingProvider).canvasBackgroundColor ?? Colors.white;
+        final bgLum = bgColor.computeLuminance();
+        final colorLum = color.computeLuminance();
+        
+        // If the AI's chosen color is too similar in brightness to the background, flip it!
+        if ((bgLum - colorLum).abs() < 0.25) {
+          color = bgLum > 0.5 ? Colors.black : Colors.white;
+        }
 
         // Robustly parse size
         double size = 1.0;

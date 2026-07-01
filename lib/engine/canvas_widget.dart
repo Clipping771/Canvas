@@ -253,7 +253,10 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
               Positioned(
                 left: drawingState.aiStatusTarget!.dx,
                 top: drawingState.aiStatusTarget!.dy,
-                child: AiStatusOverlay(status: drawingState.aiStatus!),
+                child: AiStatusOverlay(
+                  status: drawingState.aiStatus!, 
+                  textColor: (drawingState.canvasBackgroundColor ?? Colors.white).computeLuminance() > 0.5 ? Colors.black : Colors.white,
+                ),
               ),
           ],
         ),
@@ -264,7 +267,8 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
 
 class AiStatusOverlay extends StatelessWidget {
   final String status;
-  const AiStatusOverlay({super.key, required this.status});
+  final Color textColor;
+  const AiStatusOverlay({super.key, required this.status, required this.textColor});
 
   @override
   Widget build(BuildContext context) {
@@ -273,18 +277,20 @@ class AiStatusOverlay extends StatelessWidget {
       children: [
         AnimatedShimmerText(
           text: status,
+          textColor: textColor,
           style: GoogleFonts.nanumPenScript(
             textStyle: const TextStyle(fontSize: 28),
           ),
         ),
-        const AnimatedDots(),
+        AnimatedDots(textColor: textColor),
       ],
     );
   }
 }
 
 class AnimatedDots extends StatefulWidget {
-  const AnimatedDots({super.key});
+  final Color textColor;
+  const AnimatedDots({super.key, required this.textColor});
 
   @override
   AnimatedDotsState createState() => AnimatedDotsState();
@@ -328,7 +334,7 @@ class AnimatedDotsState extends State<AnimatedDots>
           child: Text(
             dots,
             style: GoogleFonts.nanumPenScript(
-              textStyle: const TextStyle(color: Colors.black54, fontSize: 28),
+              textStyle: TextStyle(color: widget.textColor.withOpacity(0.54), fontSize: 28),
             ),
           ),
         );
@@ -340,11 +346,13 @@ class AnimatedDotsState extends State<AnimatedDots>
 class AnimatedShimmerText extends StatefulWidget {
   final String text;
   final TextStyle style;
+  final Color textColor;
   
   const AnimatedShimmerText({
     super.key, 
     required this.text,
     required this.style,
+    required this.textColor,
   });
 
   @override
@@ -378,10 +386,10 @@ class _AnimatedShimmerTextState extends State<AnimatedShimmerText> with SingleTi
           blendMode: BlendMode.srcIn,
           shaderCallback: (bounds) {
             return LinearGradient(
-              colors: const [
-                Colors.black38,
-                Colors.black87,
-                Colors.black38,
+              colors: [
+                widget.textColor.withOpacity(0.38),
+                widget.textColor.withOpacity(0.87),
+                widget.textColor.withOpacity(0.38),
               ],
               stops: const [0.0, 0.5, 1.0],
               begin: const Alignment(-1.0, -0.5),
@@ -389,7 +397,10 @@ class _AnimatedShimmerTextState extends State<AnimatedShimmerText> with SingleTi
               transform: GradientRotation(_controller.value * 2 * 3.14159),
             ).createShader(bounds);
           },
-          child: Text(widget.text, style: widget.style),
+          child: Text(
+            widget.text, 
+            style: widget.style.copyWith(color: widget.textColor),
+          ),
         );
       },
     );

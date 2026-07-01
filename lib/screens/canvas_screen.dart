@@ -21,6 +21,10 @@ import '../models/page.dart';
 import '../models/stroke.dart';
 import '../services/plantuml_service.dart';
 import 'ai_chat_panel.dart';
+import '../core/event_bus.dart';
+import '../widgets/quiz_overlay.dart';
+import '../engine/semantic_camera.dart';
+import '../utils/ai_stroke_generator.dart';
 
 class CanvasScreen extends ConsumerStatefulWidget {
   final String notebookId;
@@ -99,6 +103,36 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadPageStrokes();
     });
+    EventBus().subscribe(EventType.aiActionDispatched, _handleQuizEvent);
+    EventBus().subscribe(EventType.aiTaskCompleted, _handleAiTaskCompleted);
+  }
+
+  void _handleAiTaskCompleted(CanvasEvent event) {
+    if (_canvasKey.currentState == null) return;
+    final intent = event.payload['intent'] as CameraIntent?;
+    if (intent == CameraIntent.noAction) return;
+    
+    // We get the target from drawingNotifier's lastAddedBounds
+    final bounds = ref.read(drawingProvider).lastAddedBounds;
+    if (bounds == null) return;
+    
+    // Small delay to let rendering finish
+    Future.delayed(const Duration(milliseconds: 300), () {
+       if (mounted) _focusOnTarget(bounds.center);
+    });
+  }
+
+  void _handleQuizEvent(CanvasEvent event) {
+    if (event.payload['action'] == 'trigger_quiz') {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => QuizOverlay(
+          quizData: event.payload,
+          onComplete: () => Navigator.of(context).pop(),
+        ),
+      );
+    }
   }
 
   void _loadPageStrokes() {
@@ -170,6 +204,21 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                     _loadPageStrokes();
                   }
                 : null,
+          ),
+          IconButton(
+            icon: const Icon(CupertinoIcons.add, size: 24, color: Colors.blueAccent),
+            tooltip: 'New Page',
+            onPressed: () async {
+              _saveCurrentPage();
+              await ref.read(notebookProvider.notifier).addPage(widget.notebookId);
+              if (!mounted) return;
+              final updatedNotebook = ref.read(notebookProvider).firstWhere((n) => n.id == widget.notebookId);
+              final newPage = updatedNotebook.pages.last;
+              setState(() {
+                _currentPageId = newPage.id;
+              });
+              _loadPageStrokes();
+            },
           ),
           PopupMenuButton<String>(
             shape: RoundedRectangleBorder(
@@ -373,14 +422,49 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                            HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlRight) ||
                            HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaLeft) ||
                            HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaRight);
+            final isShift = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+                            HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
                            
             if (isCtrl) {
-              if (event.logicalKey == LogicalKeyboardKey.keyC || event.logicalKey == LogicalKeyboardKey.keyD) {
-                // Duplicate selection for both Ctrl+C and Ctrl+D for seamless UX
+              if (event.logicalKey == LogicalKeyboardKey.keyC) {
+                ref.read(drawingProvider.notifier).copySelection();
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyX) {
+                ref.read(drawingProvider.notifier).cutSelection();
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyD) {
                 ref.read(drawingProvider.notifier).duplicateSelection();
                 return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyA) {
+                ref.read(drawingProvider.notifier).selectAll();
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyZ) {
+                if (isShift) {
+                  ref.read(drawingProvider.notifier).redo();
+                } else {
+                  ref.read(drawingProvider.notifier).undo();
+                }
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyY) {
+                ref.read(drawingProvider.notifier).redo();
+                return KeyEventResult.handled;
               } else if (event.logicalKey == LogicalKeyboardKey.keyV) {
-                _pasteImage();
+                final pasted = ref.read(drawingProvider.notifier).pasteFromClipboard();
+                if (!pasted) {
+                  _pasteSystemClipboard();
+                }
+                return KeyEventResult.handled;
+              }
+            } else {
+              if (event.logicalKey == LogicalKeyboardKey.delete || event.logicalKey == LogicalKeyboardKey.backspace) {
+                if (FocusManager.instance.primaryFocus != node) {
+                  return KeyEventResult.ignored;
+                }
+                ref.read(drawingProvider.notifier).deleteSelection();
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+                // To deselect, we can call a method or just trigger empty selectStrokesInRect
+                ref.read(drawingProvider.notifier).selectStrokesInRect(Rect.zero);
                 return KeyEventResult.handled;
               }
             }
@@ -572,7 +656,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                 IconButton(
                   icon: const Icon(Icons.paste, color: Colors.black87),
                   tooltip: 'Paste Image',
-                  onPressed: _pasteImage,
+                  onPressed: _pasteSystemClipboard,
                 ),
                 IconButton(
                   icon: const Icon(Icons.account_tree, color: Colors.black87),
@@ -1017,21 +1101,37 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     }
   }
 
-  Future<void> _pasteImage() async {
+  Future<void> _pasteSystemClipboard() async {
+    // 1. Try to paste image first (from Pasteboard)
     final bytes = await Pasteboard.image;
     if (bytes != null) {
       _insertImageSmart(bytes);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No image found in clipboard.')),
-      );
+      return;
     }
+    
+    // 2. Try to paste text (from Flutter Clipboard)
+    final textData = await Clipboard.getData(Clipboard.kTextPlain);
+    if (textData != null && textData.text != null && textData.text!.isNotEmpty) {
+      final transform = _canvasKey.currentState?.transformationController.value ?? Matrix4.identity();
+      final inverse = Matrix4.copy(transform)..invert();
+      final size = MediaQuery.of(context).size;
+      final center = MatrixUtils.transformPoint(inverse, Offset(size.width / 2, size.height / 2));
+      
+      final isDark = (ref.read(drawingProvider).canvasBackgroundColor ?? Colors.white).computeLuminance() < 0.5;
+      final stroke = AiStrokeGenerator.generateText(textData.text!, center.dx, center.dy, isDark ? Colors.white : Colors.black, 18.0 * 3.0);
+      ref.read(drawingProvider.notifier).addStrokes([stroke]);
+      return;
+    }
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Nothing to paste (no image or text found in clipboard).')),
+    );
   }
 
   Future<void> _showUmlDialog() async {
     final controller = TextEditingController(
       text:
-          'Alice -> Bob: Authentication Request\nBob --> Alice: Authentication Response',
+          '// Need PlantUML code?\n// 1. Ask the AI Assistant: "Generate a UML mindmap for..."\n// 2. Ask ChatGPT or Claude to write it for you\n// 3. Or write your own syntax here!',
     );
     bool isLoading = false;
 

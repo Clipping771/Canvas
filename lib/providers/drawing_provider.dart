@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/stroke.dart';
 import '../models/tool_type.dart';
@@ -134,7 +135,27 @@ class DrawingNotifier extends Notifier<DrawingState> {
     return DrawingState();
   }
 
+  static List<Stroke> clipboard = [];
   Stroke? _currentStroke;
+
+  void selectAll() {
+    if (state.strokes.isEmpty) return;
+    
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    
+    for (var stroke in state.strokes) {
+      if (stroke.bounds.left < minX) minX = stroke.bounds.left;
+      if (stroke.bounds.top < minY) minY = stroke.bounds.top;
+      if (stroke.bounds.right > maxX) maxX = stroke.bounds.right;
+      if (stroke.bounds.bottom > maxY) maxY = stroke.bounds.bottom;
+    }
+    
+    state = state.copyWith(
+      selectedStrokes: List.from(state.strokes),
+      selectionBounds: Rect.fromLTRB(minX, minY, maxX, maxY),
+    );
+  }
 
   void selectStrokesInRect(Rect rect) {
     List<Stroke> selected = [];
@@ -325,11 +346,76 @@ class DrawingNotifier extends Notifier<DrawingState> {
     final remaining = state.strokes
         .where((s) => !state.selectedStrokes.contains(s))
         .toList();
+        
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+      
     state = state.copyWith(
       strokes: remaining,
+      undoHistory: newUndoHistory,
       clearSelection: true,
       clearPreview: true,
     );
+  }
+
+  void copySelection() {
+    if (state.selectedStrokes.isEmpty) return;
+    
+    // Push text to OS clipboard so it can be pasted outside the app
+    final textStrokes = state.selectedStrokes.where((s) => s.text != null && s.text!.isNotEmpty).toList();
+    if (textStrokes.isNotEmpty) {
+      final combinedText = textStrokes.map((s) => s.text!).join('\n');
+      Clipboard.setData(ClipboardData(text: combinedText));
+    }
+    
+    clipboard = state.selectedStrokes.map((s) {
+      return Stroke(
+        points: s.points.map((p) => Offset(p.dx, p.dy)).toList(),
+        color: s.color,
+        size: s.size,
+        toolType: s.toolType,
+        text: s.text,
+        decodedImage: s.decodedImage,
+        imageBytes: s.imageBytes,
+      );
+    }).toList();
+  }
+
+  void cutSelection() {
+    if (state.selectedStrokes.isEmpty) return;
+    copySelection();
+    deleteSelection();
+  }
+
+  bool pasteFromClipboard() {
+    if (clipboard.isEmpty) return false;
+    
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+      
+    final List<Stroke> pasted = clipboard.map((s) {
+      return Stroke(
+        points: s.points.map((p) => Offset(p.dx + 20, p.dy + 20)).toList(),
+        color: s.color,
+        size: s.size,
+        toolType: s.toolType,
+        text: s.text,
+        decodedImage: s.decodedImage,
+        imageBytes: s.imageBytes,
+      );
+    }).toList();
+    
+    // Update clipboard to offset again for next paste
+    clipboard = pasted;
+    
+    state = state.copyWith(
+      strokes: [...state.strokes, ...pasted],
+      undoHistory: newUndoHistory,
+      selectedStrokes: pasted,
+      clearPreview: true,
+      selectionBounds: state.selectionBounds?.translate(20, 20),
+    );
+    return true;
   }
 
   void duplicateSelection() {

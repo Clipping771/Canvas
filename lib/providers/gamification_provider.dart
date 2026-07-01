@@ -5,22 +5,26 @@ class GamificationState {
   final int xp;
   final int level;
   final Set<String> unlockedAchievements;
+  final Set<String> unlockedSkills;
 
   GamificationState({
     this.xp = 0,
     this.level = 1,
     this.unlockedAchievements = const {},
+    this.unlockedSkills = const {},
   });
 
   GamificationState copyWith({
     int? xp,
     int? level,
     Set<String>? unlockedAchievements,
+    Set<String>? unlockedSkills,
   }) {
     return GamificationState(
       xp: xp ?? this.xp,
       level: level ?? this.level,
       unlockedAchievements: unlockedAchievements ?? this.unlockedAchievements,
+      unlockedSkills: unlockedSkills ?? this.unlockedSkills,
     );
   }
 }
@@ -39,12 +43,14 @@ class GamificationNotifier extends Notifier<GamificationState> {
     final prefs = await SharedPreferences.getInstance();
     final xp = prefs.getInt(_xpKey) ?? 0;
     final achievements = prefs.getStringList(_achievementsKey)?.toSet() ?? {};
+    final skills = prefs.getStringList('notesketch_skills')?.toSet() ?? {};
 
     int level = _calculateLevel(xp);
     state = state.copyWith(
       xp: xp,
       level: level,
       unlockedAchievements: achievements,
+      unlockedSkills: skills,
     );
   }
 
@@ -54,6 +60,10 @@ class GamificationNotifier extends Notifier<GamificationState> {
     await prefs.setStringList(
       _achievementsKey,
       state.unlockedAchievements.toList(),
+    );
+    await prefs.setStringList(
+      'notesketch_skills',
+      state.unlockedSkills.toList(),
     );
   }
 
@@ -82,6 +92,30 @@ class GamificationNotifier extends Notifier<GamificationState> {
       addXp(50);
       _saveState();
     }
+  }
+
+  // --- Skill Tree Logic ---
+  static const Map<String, int> skillLevelRequirements = {
+    'physics_mode': 3,
+    'quiz_engine': 2,
+    'magic_styles': 5,
+    'chaos_mode': 10,
+  };
+
+  bool canUnlockSkill(String skillId) {
+    final req = skillLevelRequirements[skillId];
+    if (req == null) return false;
+    return state.level >= req && !state.unlockedSkills.contains(skillId);
+  }
+
+  bool unlockSkill(String skillId) {
+    if (canUnlockSkill(skillId)) {
+      final newSkills = Set<String>.from(state.unlockedSkills)..add(skillId);
+      state = state.copyWith(unlockedSkills: newSkills);
+      _saveState();
+      return true;
+    }
+    return false;
   }
 }
 

@@ -5,6 +5,8 @@ import '../providers/notebook_provider.dart';
 import 'canvas_screen.dart';
 import '../models/page.dart';
 import 'settings_screen.dart';
+import '../providers/gamification_provider.dart';
+import '../widgets/gamification_dialog.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -98,6 +100,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
               ),
             ),
             actions: [
+              Consumer(
+                builder: (context, ref, child) {
+                  final gState = ref.watch(gamificationProvider);
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8.0, top: 4.0, bottom: 4.0),
+                    child: ActionChip(
+                      avatar: const Icon(Icons.star, color: Colors.amber, size: 18),
+                      label: Text('Lvl ${gState.level} (${gState.xp} XP)', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      backgroundColor: Colors.white.withOpacity(0.8),
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => const GamificationDialog(),
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
               IconButton(
                 icon: const Icon(CupertinoIcons.settings, size: 24, color: Colors.black54),
                 onPressed: () {
@@ -292,69 +313,71 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
         clipBehavior: Clip.antiAlias,
         child: Stack(
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Container(
-                    color: Colors.white,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF0F4F8), // Soft blue background
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: page.strokes.isNotEmpty
-                            ? const Icon(
-                                CupertinoIcons.scribble,
-                                color: Color(0xFF4A90E2),
-                                size: 36,
-                              )
-                            : const Text(
-                                'Empty',
-                                style: TextStyle(
+            Positioned.fill(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Container(
+                      color: Colors.white,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0F4F8), // Soft blue background
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: page.strokes.isNotEmpty
+                              ? const Icon(
+                                  CupertinoIcons.scribble,
                                   color: Color(0xFF4A90E2),
-                                  fontSize: 13,
+                                  size: 36,
+                                )
+                              : const Text(
+                                  'Empty',
+                                  style: TextStyle(
+                                    color: Color(0xFF4A90E2),
+                                    fontSize: 13,
+                                  ),
                                 ),
-                              ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(14.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          page.title,
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 15,
-                            letterSpacing: -0.2,
+                  Expanded(
+                    flex: 2,
+                    child: Padding(
+                      padding: const EdgeInsets.all(14.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            page.title,
+                            style: const TextStyle(
+                              color: Colors.black87,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                              letterSpacing: -0.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${page.dateCreated.day} ${_getMonth(page.dateCreated.month)}',
-                          style: const TextStyle(
-                            color: Colors.black54,
-                            fontSize: 12,
+                          const SizedBox(height: 4),
+                          Text(
+                            '${page.dateCreated.day} ${_getMonth(page.dateCreated.month)}',
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             Positioned(
               top: 10,

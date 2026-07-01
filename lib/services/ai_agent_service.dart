@@ -3,6 +3,15 @@ import 'package:http/http.dart' as http;
 import '../utils/city_matcher.dart';
 import '../models/ai_provider.dart';
 import 'memory_service.dart';
+import '../providers/settings_provider.dart';
+
+enum AiTutorMode {
+  normal,
+  eli5,
+  socratic,
+  roast,
+  exam,
+}
 
 class AiAgentService {
   /// Sends the canvas image to the AI agent and returns its response.
@@ -14,6 +23,9 @@ class AiAgentService {
     required String modelId,
     required List<Map<String, String>> chatHistory,
     required List<Map<String, dynamic>> canvasObjects,
+    double baseAmbiguityScore = 0.0,
+    AiTutorMode tutorMode = AiTutorMode.normal,
+    ArtStyleMode artStyleMode = ArtStyleMode.detailed,
   }) async {
     if (apiKey.isEmpty) {
       return "Error: Please enter an API key for ${provider.displayName} in Settings first.";
@@ -24,10 +36,21 @@ class AiAgentService {
         ? "\n\nCRITICAL MEMORY: You have learned the following rules from past mistakes. You MUST obey these rules:\n${rulesList.map((r) => "- $r").join("\n")}"
         : "";
 
-    String historySection = "\n\n--- RECENT CHAT HISTORY (Context only) ---\n";
+    String historySection = "\n\n--- STRUCTURED MEMORY WINDOW (Last 5 turns) ---\n";
     for (var msg in chatHistory.take(5)) {
-      historySection +=
-          "${msg['sender']?.toUpperCase() ?? 'USER'}: ${msg['text']}\n";
+      final sender = msg['sender']?.toUpperCase() ?? 'USER';
+      final text = msg['text'] ?? '';
+      if (sender == 'AI') {
+         if (text.contains('System: Ops blocked')) {
+            historySection += "System Enforcement: $text\n";
+         } else if (text.length > 50) {
+            historySection += "Last Intentful Action: $text\n";
+         } else {
+            historySection += "AI Message: $text\n";
+         }
+      } else {
+         historySection += "USER: $text\n";
+      }
     }
     historySection += "------------------------------------------\n";
 
@@ -96,21 +119,49 @@ class AiAgentService {
         : "";
 
     final String systemInstruction =
-        '''You are an agentic AI assistant inside a drawing app.
-You have the ability to draw and write directly on the user's canvas.
+        '''You are VinciBoard's AI Agent, an interactive AI Living Universe where drawings come to life.
+You have the ability to draw, write, simulate physics, and interact directly on the user's canvas.
+
+[TUTOR MODE: ${tutorMode.name.toUpperCase()}]
+${_getTutorInstructions(tutorMode)}
+
+[System: The client-side deterministic rule engine has assigned a Base Ambiguity Score of $baseAmbiguityScore to the current request based on keyword/entity presence. You may adjust this score by a maximum of ±0.2 in your intent_analysis.]
 $memorySection$historySection$liveContext$objectsContext
 
 CRITICAL INSTRUCTION: Your output MUST ALWAYS be a single JSON object in this exact format:
 ```json
 {
+  "step_0_ambiguity_gate": {
+    "is_ambiguous_or_underspecified": true | false,
+    "missing_entities": ["domain", "target", "subject", "etc"],
+    "decision": "ask_clarification | proceed"
+  },
+  "message": "Required if decision is 'ask_clarification' or ops is empty.",
+  "intent_analysis": {
+    "task_type": "creative | utility | conversational",
+    "ambiguity_score": 0.0_to_1.0
+  },
+  "validation": [
+    "Verify your planned actions against the current context and any saved rules. Do NOT expose internal chain-of-thought, just output an array of validation checks."
+  ],
   "rationale": "Explain your design reasoning here. Do NOT make claims about what you drew, updated, or removed (e.g. NEVER say 'I added a tree'). Just explain WHY you chose a color or style.",
   "ops": [
     // Array of action objects
   ]
 }
 ```
-If you don't need to do any actions, just return an empty "ops" array. If the user asks a conversational question or you want to reply with text, YOU MUST use the "draw_text" action to write your response directly onto the canvas! Do NOT just put it in the rationale, and NEVER output raw conversational text outside the JSON. YOUR ENTIRE RESPONSE MUST BE VALID PARSABLE JSON.
+${artStyleMode == ArtStyleMode.cute ? "CRITICAL ART STYLE OVERRIDE: The user wants CUTE, SIMPLE, CARTOONISH drawings! Use mostly circles, ovals, and very few details. Keep it extremely simple and adorable." : artStyleMode == ArtStyleMode.illustration ? "CRITICAL ART STYLE OVERRIDE: The user wants ILLUSTRATION style drawings! Use sleek, minimal, expressive continuous curves (bezier_curve) and abstract elegant representations. Avoid blocky rectangles." : "CRITICAL ART STYLE OVERRIDE: The user wants HIGHLY DETAILED drawings! Use complex hierarchical graphs with many micro-details (fur, scales, textures, fingers) and organic_paths with noise. Make it extremely detailed!"}
+```
+CRITICAL RULE (GLOBAL AMBIGUITY GATE - STEP 0):
+Evaluate ambiguity against BOTH the current request AND the Structured Memory Window.
+1. High Ambiguity (> 0.7): You MUST set `is_ambiguous_or_underspecified` to true, `decision` to "ask_clarification", and leave `ops` EMPTY. (e.g., "draw a diagram", "make something").
+2. Partial Ambiguity (0.4 - 0.7): You MUST set `decision` to "ask_clarification" UNLESS it is a utility task with explicit safe fallbacks.
+3. Low Ambiguity (< 0.4): Set `decision` to "proceed".
+4. HYBRID SCORING: Your `ambiguity_score` MUST NOT deviate from the System Base Score ($baseAmbiguityScore) by more than ±0.2!
 
+CRITICAL MESSAGE RULES:
+- If your "ops" array is empty, the "message" field MUST exist! 
+- Fallback/guessing is strictly FORBIDDEN for creative tasks. ALWAYS clarify!
 Supported actions for the "ops" array:
 1. {"action": "draw_rect", "rect": [x, y, w, h], "color": "0xFFFF0000", "size": 2.0}
 2. {"action": "draw_circle", "center": [cx, cy], "radius": r, "color": "0xFF00FF00", "size": 2.0}
@@ -125,12 +176,14 @@ Supported actions for the "ops" array:
 11. {"action": "tween_area", "rect": [x, y, w, h], "dx": 20, "dy": 0, "scale": 1.0, "rotation": 0.0, "duration_ms": 2000}
 12. {"action": "learn_rule", "rule": "Never draw over the image"}
 13. {"action": "insert_widget", "type": "weather", "city": "London", "position": [x, y]}
-14. {"action": "draw_template", "name": "frog", "position": [x, y], "size": 100, "isFilled": false} (Available names: frog, car, house, tree. Do NOT invent new names!)
-15. {"action": "draw_svg", "path": "M 10 10 C 20 20, 40 20, 50 10 Z", "position": [x, y], "scale": 1.0, "color": "0xFF00FF00"} (Use this for drawing DETAILED arbitrary custom shapes like snakes, carts, cats, etc! Output a single valid SVG path data string.)
-16. {"action": "update", "targetId": "s_123", "targetGroupId": "tree", "patch": {"color": "0xFF00FF00", "isFilled": true}}
+14. {"action": "draw_template", "name": "frog", "position": [x, y], "size": 100, "isFilled": false} (Available names: frog, dog, car, house, tree. STRICTLY DO NOT invent new names!)
+15. {"action": "draw_composite", "name": "cat", "position": [x, y], "scale": 1.0, "parts": [{"type": "ellipse", "name": "head", "cx": 0, "cy": -50, "rx": 30, "ry": 25, "color": "0xFF000000", "details": [{"type": "polygon", "name": "ear_L", "points": [[-20,-70], [-30,-90], [-10,-80]]}]}, {"type": "organic_path", "name": "body", "base_points": [[-20,-20],[20,-20],[20,40],[-20,40]], "noise_level": 5.0}, {"type": "bezier_curve", "name": "tail", "p0": [0,40], "p1": [20,60], "p2": [30,30], "p3": [50,50]}]} (CRITICAL: For complex unlisted objects, you MUST use draw_composite with a Hierarchical Drawing Graph! Break it into Macro 'parts' (body, head) and Micro 'details' (ears, eyes). Valid types: 'circle' (cx,cy,r), 'ellipse' (cx,cy,rx,ry), 'rect' (x,y,w,h), 'line' (x1,y1,x2,y2), 'polygon' (points: [[x,y]...]), 'bezier_curve' (p0, p1, p2, p3), 'organic_path' (base_points, noise_level). Use recursion via 'details' arrays!)
+16. {"action": "draw_svg", "path": "M 10 10 C 20 20, 40 20, 50 10 Z", "position": [x, y], "scale": 1.0, "color": "0xFF00FF00"} (Use ONLY for extremely abstract continuous curves where geometric parts fail.)
+17. {"action": "update", "targetId": "s_123", "targetGroupId": "tree", "patch": {"color": "0xFF00FF00", "isFilled": true}}
 17. {"action": "remove", "targetId": "s_123", "targetGroupId": "tree"}
 18. {"action": "tag", "ids": ["s_1", "s_2"], "name": "house"}
 19. {"action": "apply_gravity", "targetGroupId": "car"} (Optional: specify targetGroupId to apply gravity to a specific object)
+20. {"action": "insert_uml", "plantuml": "@startuml\n...\n@enduml", "position": [x, y]} (Use ONLY valid PlantUML syntax!)
 
 CRITICAL UML AND CHARTS RULE: If the user asks for a CHART, GRAPH, WIREFRAME, or MINDMAP, use the `insert_uml` action with valid PlantUML code.
 - Do NOT use `@startsalt` for tables! It looks like a terrible 1990s wireframe and the user hates it!
@@ -139,7 +192,9 @@ CRITICAL TABLE AND LIST RULE: When the user asks for a TABLE or LIST (like app f
 - Just use `draw_text` to write the list directly on the canvas in a clean, readable format.
 - Do NOT use `draw_rect` or background cards as they take too long to draw and don't look good for simple lists.
 
-CRITICAL MEMORY & SELF-CORRECTION RULE: If the user corrects a mistake you made, you MUST use the `learn_rule` action!
+CRITICAL AUTONOMOUS REINFORCEMENT LEARNING RULE: If the user complains, corrects a mistake, or expresses dissatisfaction, YOU MUST autonomously deduce what went wrong and proactively use the `learn_rule` action!
+- STABLE PREFERENCES ONLY: Distinguish between one-time temporary corrections (e.g., "make this circle blue") and persistent long-term preferences (e.g., "always use blue for circles"). ONLY save persistent preferences permanently.
+- RULE PRIORITY HIERARCHY: When generating actions, strictly obey rules in this order: 1) Current explicit instruction, 2) Saved long-term preferences, 3) Default behavior.
 
 CRITICAL MATH FORMATTING RULE: When you are outputting ANY math equations, formulas, fractions, or physics solutions, you MUST use the `draw_latex` action! DO NOT use `draw_text` for math! 
 - If your LaTeX equation spans MULTIPLE lines using `\\`, you MUST wrap the entire expression in an `\\begin{aligned} ... \\end{aligned}` block!
@@ -352,6 +407,22 @@ User prompt: ''';
       return data['content'][0]['text'] ?? 'No response';
     } else {
       throw Exception('Status ${response.statusCode}: ${response.body}');
+    }
+  }
+
+  static String _getTutorInstructions(AiTutorMode mode) {
+    switch (mode) {
+      case AiTutorMode.eli5:
+        return "Explain everything as if you are talking to a 5-year-old. Use simple words, analogies, and a very friendly tone.";
+      case AiTutorMode.socratic:
+        return "Do NOT give the direct answer. Instead, ask guiding questions to lead the user to discover the answer themselves.";
+      case AiTutorMode.roast:
+        return "You are highly sarcastic and witty. Roast the user's drawing skills or questions lightly, but still provide helpful answers.";
+      case AiTutorMode.exam:
+        return "Be strict, academic, and precise. Grade their inputs, point out technical flaws, and use advanced terminology.";
+      case AiTutorMode.normal:
+      default:
+        return "Be a helpful, visual-first AI tutor. When explaining concepts, favor drawing diagrams, mindmaps, or visual models.";
     }
   }
 }

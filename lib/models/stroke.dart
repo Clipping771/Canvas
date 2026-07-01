@@ -22,6 +22,12 @@ class Stroke {
   ui.Image? decodedImage;
   final bool isFilled;
 
+  // --- Canvas Object Model Metadata ---
+  final String? semanticMeaning; // AI-assigned semantic tags
+  final bool physicsEnabled; // Flags if this object interacts with physics engine
+  final Map<String, dynamic>? customMetadata; // Open-ended state/sync tracking
+  final int version; // Event versioning for conflict resolution
+
   Stroke({
     String? id,
     this.groupId,
@@ -35,6 +41,10 @@ class Stroke {
     this.imageBytes,
     this.decodedImage,
     this.isFilled = false,
+    this.semanticMeaning,
+    this.physicsEnabled = false,
+    this.customMetadata,
+    this.version = 1,
   }) : id = id ?? _uuid.v4();
 
   Rect get bounds {
@@ -142,6 +152,10 @@ class Stroke {
     Uint8List? imageBytes,
     ui.Image? decodedImage,
     bool? isFilled,
+    String? semanticMeaning,
+    bool? physicsEnabled,
+    Map<String, dynamic>? customMetadata,
+    int? version,
     bool clearGroupId = false,
     bool clearName = false,
   }) {
@@ -158,6 +172,10 @@ class Stroke {
       imageBytes: imageBytes ?? this.imageBytes,
       decodedImage: decodedImage ?? this.decodedImage,
       isFilled: isFilled ?? this.isFilled,
+      semanticMeaning: semanticMeaning ?? this.semanticMeaning,
+      physicsEnabled: physicsEnabled ?? this.physicsEnabled,
+      customMetadata: customMetadata ?? this.customMetadata,
+      version: version ?? this.version,
     );
   }
 
@@ -174,6 +192,10 @@ class Stroke {
       'text': text,
       'imageBytes': imageBytes != null ? base64Encode(imageBytes!) : null,
       'isFilled': isFilled,
+      'semanticMeaning': semanticMeaning,
+      'physicsEnabled': physicsEnabled,
+      'customMetadata': customMetadata,
+      'version': version,
     };
   }
 
@@ -197,6 +219,10 @@ class Stroke {
           ? base64Decode(json['imageBytes'])
           : null,
       isFilled: json['isFilled'] ?? false,
+      semanticMeaning: json['semanticMeaning'] as String?,
+      physicsEnabled: json['physicsEnabled'] ?? false,
+      customMetadata: json['customMetadata'] as Map<String, dynamic>?,
+      version: json['version'] ?? 1,
     );
   }
 }

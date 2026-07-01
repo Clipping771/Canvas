@@ -31,7 +31,7 @@ class NoteSketchProApp extends ConsumerWidget {
     final fontFamily = GoogleFonts.getFont(fontName).fontFamily;
 
     return MaterialApp(
-      title: 'NoteSketch Pro',
+      title: 'Vinci Board',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

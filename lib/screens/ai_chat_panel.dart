@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_drawing/path_drawing.dart';
 import '../engine/canvas_exporter.dart';
@@ -17,6 +18,11 @@ import '../utils/ai_stroke_generator.dart';
 import '../utils/sketch_templates.dart';
 import '../models/stroke.dart';
 import '../models/tool_type.dart';
+import '../models/spatial_node.dart';
+import '../engine/weight_controller.dart';
+import '../engine/semantic_camera.dart';
+import '../providers/spatial_registry_provider.dart';
+import '../core/event_bus.dart';
 
 class AiChatPanel extends ConsumerStatefulWidget {
   final VoidCallback? onDrawStart;
@@ -42,7 +48,39 @@ class AiChatPanel extends ConsumerStatefulWidget {
 
 class _AiChatPanelState extends ConsumerState<AiChatPanel> {
   final TextEditingController _textController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   bool _isTyping = false;
+  bool _cancelRequested = false;
+  AiTutorMode _selectedTutorMode = AiTutorMode.normal;
+
+  @override
+  void initState() {
+    super.initState();
+    _textController.addListener(() {
+      setState(() {}); // For dynamic clear button
+    });
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
 
   void _sendMessage() async {
     final text = _textController.text.trim();
@@ -53,8 +91,12 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
     _textController.clear();
     chatNotifier.addMessage({'sender': 'user', 'text': text});
+    _scrollToBottom();
 
-    setState(() => _isTyping = true);
+    setState(() {
+      _isTyping = true;
+      _cancelRequested = false;
+    });
     drawingNotifier.setAiStatus('Thinking');
 
     try {
@@ -121,21 +163,38 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         final scaledMaxX = (maxX * pixelRatio).toInt();
         final scaledMaxY = (maxY * pixelRatio).toInt();
 
-        // Calculate target insertion coordinates
-        double targetX = (minX + maxX) / 2.0;
-        double targetY = maxY + 50.0;
-
-        switch (widget.insertionPosition) {
-          case 'Bottom': targetX = (minX + maxX) / 2.0; targetY = maxY + 50.0; break;
-          case 'Top': targetX = (minX + maxX) / 2.0; targetY = minY - 300.0; break;
-          case 'Left': targetX = minX - 400.0; targetY = (minY + maxY) / 2.0; break;
-          case 'Right': targetX = maxX + 50.0; targetY = (minY + maxY) / 2.0; break;
-          case 'Diagonal': targetX = maxX + 50.0; targetY = maxY + 50.0; break;
-          case 'Center': targetX = screenSize.width / 2.0; targetY = screenSize.height / 2.0; break;
-        }
+        // --- COGNITIVE SPATIAL OS: Layout Intelligence Layer ---
+        final spatialRegistry = ref.read(spatialRegistryProvider.notifier);
+        final drawingState = ref.read(drawingProvider);
+        final parentId = drawingState.selectedStrokes.isNotEmpty ? drawingState.selectedStrokes.first.groupId : null;
         
+        final contexts = <InteractionContext>{};
+        if (drawingState.selectedStrokes.isNotEmpty) contexts.add(InteractionContext.branching);
+        else contexts.add(InteractionContext.newThread);
+        
+        // Transform viewport to scene coordinates
         final inverse = Matrix4.copy(transform)..invert();
-        canvasTargetCenter = MatrixUtils.transformPoint(inverse, Offset(targetX, targetY));
+        final viewportRect = Rect.fromPoints(
+          MatrixUtils.transformPoint(inverse, const Offset(0, 0)),
+          MatrixUtils.transformPoint(inverse, Offset(screenSize.width, screenSize.height))
+        );
+        
+        final parentBounds = parentId != null ? spatialRegistry.getParentBounds(parentId) : 
+            Rect.fromLTRB(minX, minY, maxX, maxY); // Fallback to raw selection bounds
+            
+        final optimalOffset = spatialRegistry.state.layoutEngine.computeOptimalPlacement(
+          nodeSize: const Size(400, 400), // Estimated generation size
+          parentBounds: parentBounds,
+          viewportBounds: viewportRect,
+          contexts: contexts,
+          groupId: 'pending_ai_task',
+        );
+
+        canvasTargetCenter = optimalOffset + const Offset(200, 200); // Center of estimated bounds
+        
+        final viewportTarget = MatrixUtils.transformPoint(transform, optimalOffset);
+        final targetX = viewportTarget.dx;
+        final targetY = viewportTarget.dy;
         
         if (widget.onCameraFocusRequired != null) {
           widget.onCameraFocusRequired!(canvasTargetCenter);
@@ -159,14 +218,21 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               "\n\n[System Note: The existing canvas content is located within the bounding box [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested the layout position to be '${widget.insertionPosition}'. YOU MUST output absolute coordinates that place your new drawing starting exactly at [x: $targetXScaled, y: $targetYScaled]. If generating multiple items, stack them tightly and logically next to each other so they form a single coherent block! Do not separate them by large distances.]";
         }
       } else {
+        final targetX = screenSize.width / 2.0;
+        final targetY = screenSize.height / 2.0;
         canvasTargetCenter = MatrixUtils.transformPoint(
             Matrix4.copy(transform)..invert(),
-            Offset(screenSize.width / 2.0, screenSize.height / 2.0));
+            Offset(targetX, targetY));
             
         if (widget.onCameraFocusRequired != null) {
           widget.onCameraFocusRequired!(canvasTargetCenter);
         }
         drawingNotifier.setAiStatus('Thinking', target: canvasTargetCenter);
+        
+        final targetXScaled = (targetX * pixelRatio).toInt();
+        final targetYScaled = (targetY * pixelRatio).toInt();
+        
+        inkBoundsStr = "\n\n[System Note: The canvas is currently empty. YOU MUST output absolute coordinates that place your new drawing starting exactly at the center of the viewport: [x: $targetXScaled, y: $targetYScaled]. Do not put items extremely far away.]";
       }
 
       final scaledWidth = (screenSize.width * pixelRatio).toInt();
@@ -175,24 +241,58 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       final augmentedPrompt = '''$text
 [System Note: The canvas image size you are analyzing is ${scaledWidth}x$scaledHeight. You must output your coordinates based on this exact ${scaledWidth}x$scaledHeight scale.]$inkBoundsStr''';
 
-      final currentStrokes = ref.read(drawingProvider).strokes;
-      final canvasObjects = currentStrokes.map((s) {
+      // --- Context Slicing System (Phase 2) ---
+      final drawingState = ref.read(drawingProvider);
+      final viewportRect = Rect.fromLTWH(0, 0, screenSize.width, screenSize.height);
+      
+      List<Stroke> targetStrokes = drawingState.selectedStrokes.isNotEmpty 
+          ? drawingState.selectedStrokes 
+          : drawingState.strokes;
+
+      final canvasObjects = <Map<String, dynamic>>[];
+      for (var s in targetStrokes) {
         final screenRect = MatrixUtils.transformRect(transform, s.bounds);
-        return {
+        
+        // Viewport Slicing (skip if not on screen and not explicitly selected)
+        if (drawingState.selectedStrokes.isEmpty && !viewportRect.overlaps(screenRect)) {
+           continue; // Token compression: skip off-screen objects
+        }
+        
+        canvasObjects.add({
           'id': s.id,
           'groupId': s.groupId,
-          'name': s.name,
-          'toolType': s.toolType.toString(),
+          'type': s.semanticMeaning ?? s.toolType.toString(), // Concept Extraction prep
           'bounds': [
             (screenRect.left * pixelRatio).toInt(),
             (screenRect.top * pixelRatio).toInt(),
             (screenRect.width * pixelRatio).toInt(),
             (screenRect.height * pixelRatio).toInt(),
           ],
-        };
-      }).toList();
+        });
+      }
+
+      // --- Deterministic Gate Engine (Layer 1) ---
+      double baseAmbiguityScore = 0.0;
+      final textLower = text.toLowerCase().trim();
+      final ambiguousKeywords = ['something', 'nice', 'cool', 'diagram', 'system', 'it', 'this', 'that', 'mindmap', 'ui', 'app', 'design'];
+      
+      if (textLower.length < 30) {
+        final words = textLower.split(RegExp(r'\s+'));
+        int ambiguousCount = 0;
+        for (var word in words) {
+          if (ambiguousKeywords.contains(word)) {
+            ambiguousCount++;
+          }
+        }
+        if (ambiguousCount > 0 && words.length <= 5) {
+          baseAmbiguityScore = 0.8;
+        } else if (ambiguousCount > 0) {
+          baseAmbiguityScore = 0.5;
+        }
+      }
 
       final chatHistory = ref.read(aiChatProvider).messages;
+      final currentSettings = ref.read(settingsProvider);
       final response = await AiAgentService.askAgent(
         imageBytes: imageBytes ?? [],
         prompt: augmentedPrompt,
@@ -201,6 +301,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         modelId: modelId,
         chatHistory: chatHistory,
         canvasObjects: canvasObjects,
+        baseAmbiguityScore: baseAmbiguityScore,
+        tutorMode: _selectedTutorMode,
+        artStyleMode: currentSettings.artStyleMode,
       );
 
       String? diffSummary;
@@ -241,29 +344,61 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               jsonStr = response.substring(start, end);
             }
           }
+        
+        if (_cancelRequested) {
+          throw Exception("Cancelled by user");
+        }
+
+        final startDelay = math.Random().nextInt(300) + 100;
 
           final data = jsonDecode(jsonStr);
 
           List actions = [];
-          if (data is Map && data.containsKey('ops')) {
-            actions = List.from(data['ops'] ?? []);
+          String? aiMessage;
+          if (data is Map) {
+            aiMessage = data['message'] as String?;
+            if (data.containsKey('ops')) {
+              actions = List.from(data['ops'] ?? []);
+            } else if (data.containsKey('actions')) {
+              actions = List.from(data['actions'] ?? []);
+            }
             rationaleText = data['rationale'] as String?;
+
+            // --- LLM Refinement Clamping (Layer 2) ---
+            if (data.containsKey('intent_analysis')) {
+              final intentAnalysis = data['intent_analysis'];
+              if (intentAnalysis is Map && intentAnalysis.containsKey('ambiguity_score')) {
+                 double llmScore = (intentAnalysis['ambiguity_score'] as num).toDouble();
+                 // Clamp to ±0.2 of baseAmbiguityScore
+                 if (llmScore > baseAmbiguityScore + 0.2) llmScore = baseAmbiguityScore + 0.2;
+                 if (llmScore < baseAmbiguityScore - 0.2) llmScore = baseAmbiguityScore - 0.2;
+                 
+                 // If the final score is > 0.7, enforce Clarification Gate
+                 if (llmScore > 0.7 || (data.containsKey('step_0_ambiguity_gate') && data['step_0_ambiguity_gate']['decision'] == 'ask_clarification')) {
+                    if (actions.isNotEmpty) {
+                       print("Client-Side Gate: Ops rejected due to high ambiguity score.");
+                       actions.clear();
+                       // Observable Enforcement: Inject a system message to correct state sync
+                       chatNotifier.addMessage({'sender': 'ai', 'text': '[System: Ops blocked by ambiguity gate. The AI generated actions but they were rejected for being too ambiguous without clarification.]'});
+                    }
+                 }
+              }
+            }
           } else if (data is List) {
             actions = List.from(data);
-          } else if (data is Map && data.containsKey('actions')) {
-            actions = List.from(data['actions'] ?? []);
           }
 
-          if (actions.isEmpty &&
-              rationaleText != null &&
-              rationaleText.trim().isNotEmpty) {
-            final screenSize = MediaQuery.of(context).size;
+          // Force all conversational AI responses to be drawn on canvas instead of chat UI
+          final textToDraw = (aiMessage != null && aiMessage.trim().isNotEmpty) ? aiMessage.trim() : rationaleText?.trim();
+          
+          if (actions.isEmpty && textToDraw != null && textToDraw.isNotEmpty) {
+            final viewportTarget = MatrixUtils.transformPoint(transform, canvasTargetCenter!);
             actions.add({
               "action": "draw_text",
-              "text": rationaleText,
+              "text": textToDraw,
               "position": [
-                screenSize.width / 2.0 - 150.0,
-                screenSize.height / 2.0,
+                viewportTarget.dx - 150.0,
+                viewportTarget.dy,
               ],
               "color": "0xFF000000",
               "size": 18.0,
@@ -280,19 +415,26 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           }
 
           drawingNotifier.setAiStatus('Working', target: canvasTargetCenter);
-          diffSummary = await _executeAiActions(actions);
-          
-          if (diffSummary == null || diffSummary.isEmpty) {
-             // Fallback: forcefully draw if _executeAiActions aborted (e.g. unmounted)
-             final screenSize = MediaQuery.of(context).size;
-             final textToDraw = rationaleText ?? response;
-             final p = widget.getTransform != null 
-                 ? MatrixUtils.transformPoint(Matrix4.copy(widget.getTransform!()!)..invert(), Offset(screenSize.width / 2.0 / 2.0, screenSize.height / 2.0 / 2.0))
-                 : Offset(screenSize.width / 2.0, screenSize.height / 2.0);
-             drawingNotifier.addStrokes([
-               AiStrokeGenerator.generateText(textToDraw, p.dx, p.dy, const Color(0xFF000000), 18.0 * 3.0)
-             ]);
-             diffSummary = "1 টি নতুন অবজেক্ট যুক্ত হয়েছে";
+          try {
+            // --- Multi-Intent Router & Engine Priority Integration (Phase 1) ---
+            // Future integration: MultiIntentRouter().routeOps(actions);
+            // For now, executing through legacy block with Safe Mode wrapper.
+            diffSummary = await _executeAiActions(actions);
+            
+            if (diffSummary == null || diffSummary.isEmpty) {
+               // Normal empty ops behavior, handled gracefully
+               diffSummary = "";
+            }
+          } catch (engineError) {
+             print("Engine Error during execution: $engineError");
+             // --- Safe Mode Fallback ---
+             chatNotifier.addMessage({
+               'sender': 'system', 
+               'text': '[Safe Mode Activated] A rendering engine encountered a critical error. Falling back to safe static canvas.'
+             });
+             // Disable physics/animations temporarily if needed
+             // drawingNotifier.disablePhysicsTemporary();
+             diffSummary = "Safe Mode active";
           }
 
           if (diffSummary.isNotEmpty) {
@@ -303,63 +445,37 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           }
         } catch (e) {
           print("Failed to decode AI JSON: $e");
-          // If it completely fails to parse as JSON, assume it's conversational
+          // If it completely fails to parse as JSON, assume it's pure conversational text
           
           final screenSize = MediaQuery.of(context).size;
+          drawingNotifier.setAiStatus('Working');
+          
+          final inverse = Matrix4.copy(transform)..invert();
+          final catchTargetCenter = MatrixUtils.transformPoint(inverse, Offset(screenSize.width / 2.0, screenSize.height / 2.0));
+          
+          final viewportTarget = MatrixUtils.transformPoint(transform, catchTargetCenter);
+
           List actions = [{
             "action": "draw_text",
-            "text": response,
+            "text": response.trim(),
             "position": [
-              screenSize.width / 2.0 - 150.0,
-              screenSize.height / 2.0,
+              viewportTarget.dx - 150.0,
+              viewportTarget.dy,
             ],
             "color": "0xFF000000",
             "size": 18.0,
           }];
-          
-          drawingNotifier.setAiStatus('Working');
-          final inverse = Matrix4.copy(transform)..invert();
-          
-          Offset? canvasTargetCenter;
-          if (minX != double.infinity) {
-            // targetX and targetY are available in the scope from earlier calculations
-            double tgtX = (minX + maxX) / 2.0;
-            double tgtY = maxY + 50.0;
-            switch (widget.insertionPosition) {
-              case 'Bottom': tgtX = (minX + maxX) / 2.0; tgtY = maxY + 50.0; break;
-              case 'Top': tgtX = (minX + maxX) / 2.0; tgtY = minY - 300.0; break;
-              case 'Left': tgtX = minX - 400.0; tgtY = (minY + maxY) / 2.0; break;
-              case 'Right': tgtX = maxX + 50.0; tgtY = (minY + maxY) / 2.0; break;
-              case 'Diagonal': tgtX = maxX + 50.0; tgtY = maxY + 50.0; break;
-              case 'Center': tgtX = screenSize.width / 2.0; tgtY = screenSize.height / 2.0; break;
-            }
-            canvasTargetCenter = MatrixUtils.transformPoint(inverse, Offset(tgtX, tgtY));
-          } else {
-             canvasTargetCenter = MatrixUtils.transformPoint(inverse, Offset(screenSize.width / 2.0, screenSize.height / 2.0));
-          }
 
-          drawingNotifier.setAiStatus('Working', target: canvasTargetCenter);
-          final summary = await _executeAiActions(actions, targetCenter: canvasTargetCenter);
-          
-          if (summary == null || summary.isEmpty) {
-             // Forceful fallback if _executeAiActions aborted
-             final p = widget.getTransform != null 
-                 ? MatrixUtils.transformPoint(Matrix4.copy(widget.getTransform!()!)..invert(), Offset(screenSize.width / 2.0 / 2.0, screenSize.height / 2.0 / 2.0))
-                 : Offset(screenSize.width / 2.0, screenSize.height / 2.0);
-             final bgColor = drawingNotifier.state.canvasBackgroundColor ?? Colors.white;
-             final isBgDark = bgColor.computeLuminance() < 0.5;
-             drawingNotifier.addStrokes([
-               AiStrokeGenerator.generateText(response, p.dx, p.dy, isBgDark ? Colors.white : Colors.black, 18.0 * 3.0)
-             ]);
-          }
+          drawingNotifier.setAiStatus('Working', target: catchTargetCenter);
+          await _executeAiActions(actions, targetCenter: catchTargetCenter);
         }
       }
 
-      // We only want to show actual errors in the chat UI now, no success responses.
-      if (displayText.startsWith("AI Error") || displayText.startsWith("Error:")) {
-        if (displayText.trim().isNotEmpty) {
-          chatNotifier.addMessage({'sender': 'ai', 'text': displayText.trim()});
-        }
+      // We removed adding displayText to chatNotifier here because 
+      // the user strictly wants responses ONLY on the canvas.
+      if (displayText.trim().isNotEmpty && displayText.contains('[System')) {
+        // Only system warnings/enforcements are allowed in chat
+        chatNotifier.addMessage({'sender': 'system', 'text': displayText.trim()});
       }
     } catch (e) {
       if (mounted) {
@@ -541,6 +657,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             final bytes = await PlantUmlService.fetchUmlImage(umlStr);
             if (bytes != null && mounted) {
               drawingNotifier.insertImage(bytes, p);
+              objectsAdded++; // Prevent fallback text from drawing!
             }
           }
           continue;
@@ -572,8 +689,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                 size: 1.0,
                 toolType: ToolType.widget,
                 text: jsonEncode(action),
+                groupId: 'widget_${DateTime.now().millisecondsSinceEpoch}',
               );
-              drawingNotifier.addStrokes([stroke]);
+              newStrokes.add(stroke);
             } else {
               // Create completely new widget
               final stroke = Stroke(
@@ -582,8 +700,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                 size: 1.0,
                 toolType: ToolType.widget,
                 text: jsonEncode(action),
+                groupId: 'widget_${DateTime.now().millisecondsSinceEpoch}',
               );
-              drawingNotifier.addStrokes([stroke]);
+              newStrokes.add(stroke);
             }
           }
           continue;
@@ -780,6 +899,107 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               text: text,
             ),
           );
+        } else if (type == 'draw_composite') {
+          final parts = action['parts'] as List?;
+          final pos = action['position'] as List?;
+          final compositeName = action['name'] as String? ?? 'composite';
+          final scaleModifier = (action['scale'] as num?)?.toDouble() ?? 1.0;
+          
+          if (parts != null && pos != null && pos.length >= 2) {
+            double rawX = pos[0].toDouble();
+            double rawY = pos[1].toDouble();
+            final basePos = mapPoint(rawX, rawY);
+            final viewScale = inverse.getMaxScaleOnAxis();
+            final overallScale = viewScale * scaleModifier;
+            
+            final groupId = '${compositeName}_${DateTime.now().millisecondsSinceEpoch}';
+            
+            void parsePartsList(List partsList) {
+              for (var part in partsList) {
+                if (part is! Map) continue;
+                final partType = part['type'] as String?;
+                final partColorHex = part['color'] as String?;
+                Color partColor = color; // default to outer color
+                if (partColorHex != null) {
+                  try {
+                    partColor = Color(int.parse(partColorHex.replaceFirst('0x', '').replaceFirst('#', ''), radix: 16) + 0xFF000000);
+                  } catch (_) {}
+                }
+                final isFilled = part['isFilled'] as bool? ?? false;
+                
+                if (partType == 'circle') {
+                   final cx = (part['cx'] as num?)?.toDouble() ?? 0.0;
+                   final cy = (part['cy'] as num?)?.toDouble() ?? 0.0;
+                   final r = (part['r'] as num?)?.toDouble() ?? 20.0;
+                   final stroke = AiStrokeGenerator.generateCircle(
+                     basePos.dx + (cx * overallScale), basePos.dy + (cy * overallScale), r * overallScale, partColor, 2.0 * viewScale
+                   );
+                   newStrokes.add(stroke.copyWith(groupId: groupId, name: part['name']?.toString(), isFilled: isFilled, semanticMeaning: compositeName));
+                } else if (partType == 'ellipse') {
+                   final cx = (part['cx'] as num?)?.toDouble() ?? 0.0;
+                   final cy = (part['cy'] as num?)?.toDouble() ?? 0.0;
+                   final rx = (part['rx'] as num?)?.toDouble() ?? 30.0;
+                   final ry = (part['ry'] as num?)?.toDouble() ?? 20.0;
+                   final stroke = AiStrokeGenerator.generateEllipse(
+                     basePos.dx + (cx * overallScale), basePos.dy + (cy * overallScale), rx * overallScale, ry * overallScale, partColor, 2.0 * viewScale
+                   );
+                   newStrokes.add(stroke.copyWith(groupId: groupId, name: part['name']?.toString(), isFilled: isFilled, semanticMeaning: compositeName));
+                } else if (partType == 'rect') {
+                   final px = (part['x'] as num?)?.toDouble() ?? 0.0;
+                   final py = (part['y'] as num?)?.toDouble() ?? 0.0;
+                   final pw = (part['w'] as num?)?.toDouble() ?? 40.0;
+                   final ph = (part['h'] as num?)?.toDouble() ?? 40.0;
+                   final stroke = AiStrokeGenerator.generateRect(
+                     basePos.dx + (px * overallScale), basePos.dy + (py * overallScale), pw * overallScale, ph * overallScale, partColor, 2.0 * viewScale
+                   );
+                   newStrokes.add(stroke.copyWith(groupId: groupId, name: part['name']?.toString(), isFilled: isFilled, semanticMeaning: compositeName));
+                } else if (partType == 'line') {
+                   final x1 = (part['x1'] as num?)?.toDouble() ?? 0.0;
+                   final y1 = (part['y1'] as num?)?.toDouble() ?? 0.0;
+                   final x2 = (part['x2'] as num?)?.toDouble() ?? 0.0;
+                   final y2 = (part['y2'] as num?)?.toDouble() ?? 0.0;
+                   newStrokes.add(Stroke(
+                     groupId: groupId, name: part['name']?.toString(), semanticMeaning: compositeName,
+                     points: [Offset(basePos.dx + (x1 * overallScale), basePos.dy + (y1 * overallScale)), Offset(basePos.dx + (x2 * overallScale), basePos.dy + (y2 * overallScale))],
+                     color: partColor, size: 2.0 * viewScale, toolType: ToolType.pen,
+                   ));
+                } else if (partType == 'bezier_curve') {
+                   final p0 = part['p0'] as List? ?? [0,0];
+                   final p1 = part['p1'] as List? ?? [0,0];
+                   final p2 = part['p2'] as List? ?? [0,0];
+                   final p3 = part['p3'] as List? ?? [0,0];
+                   double safeNum(dynamic l, int idx) => (l is List && l.length > idx && l[idx] != null) ? (l[idx] as num).toDouble() : 0.0;
+                   final stroke = AiStrokeGenerator.generateBezierCurve(
+                     Offset(basePos.dx + (safeNum(p0,0) * overallScale), basePos.dy + (safeNum(p0,1) * overallScale)),
+                     Offset(basePos.dx + (safeNum(p1,0) * overallScale), basePos.dy + (safeNum(p1,1) * overallScale)),
+                     Offset(basePos.dx + (safeNum(p2,0) * overallScale), basePos.dy + (safeNum(p2,1) * overallScale)),
+                     Offset(basePos.dx + (safeNum(p3,0) * overallScale), basePos.dy + (safeNum(p3,1) * overallScale)),
+                     partColor, 2.0 * viewScale
+                   );
+                   newStrokes.add(stroke.copyWith(groupId: groupId, name: part['name']?.toString(), semanticMeaning: compositeName));
+                } else if (partType == 'organic_path') {
+                   final bPts = part['base_points'] as List? ?? [[0,0]];
+                   final nl = (part['noise_level'] as num?)?.toDouble() ?? 3.0;
+                   double safeNum(dynamic l, int idx) => (l is List && l.length > idx && l[idx] != null) ? (l[idx] as num).toDouble() : 0.0;
+                   List<Offset> mapped = bPts.map((pt) => Offset(basePos.dx + (safeNum(pt,0) * overallScale), basePos.dy + (safeNum(pt,1) * overallScale))).toList();
+                   final stroke = AiStrokeGenerator.generateOrganicPath(mapped, nl * overallScale, partColor, 2.0 * viewScale);
+                   newStrokes.add(stroke.copyWith(groupId: groupId, name: part['name']?.toString(), isFilled: isFilled, semanticMeaning: compositeName));
+                } else if (partType == 'polygon') {
+                   final pts = part['points'] as List? ?? [[0,0]];
+                   double safeNum(dynamic l, int idx) => (l is List && l.length > idx && l[idx] != null) ? (l[idx] as num).toDouble() : 0.0;
+                   List<Offset> mapped = pts.map((pt) => Offset(basePos.dx + (safeNum(pt,0) * overallScale), basePos.dy + (safeNum(pt,1) * overallScale))).toList();
+                   final stroke = AiStrokeGenerator.generatePolygon(mapped, partColor, 2.0 * viewScale);
+                   newStrokes.add(stroke.copyWith(groupId: groupId, name: part['name']?.toString(), isFilled: isFilled, semanticMeaning: compositeName));
+                }
+                
+                if (part['details'] is List) {
+                   parsePartsList(part['details'] as List);
+                }
+              }
+            }
+            
+            parsePartsList(parts);
+          }
         } else if (type == 'draw_svg') {
           final pathData = action['path'] as String?;
           final pos = action['position'] as List?;
@@ -1103,10 +1323,27 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         }
       }
       if (maxX != double.negativeInfinity) {
-        drawingNotifier.setLastAddedBounds(
-          Rect.fromLTRB(minX, minY, maxX, maxY),
-        );
+        final bounds = Rect.fromLTRB(minX, minY, maxX, maxY);
+        drawingNotifier.setLastAddedBounds(bounds);
         finalMaxY = maxY;
+        
+        // --- COGNITIVE SPATIAL OS: Graph Registration ---
+        final spatialRegistry = ref.read(spatialRegistryProvider.notifier);
+        final parentId = ref.read(drawingProvider).selectedStrokes.isNotEmpty ? ref.read(drawingProvider).selectedStrokes.first.groupId : null;
+        
+        final node = SpatialNode(
+           groupId: newStrokes.first.groupId ?? 'generated_${DateTime.now().millisecondsSinceEpoch}',
+           clusterId: parentId ?? 'root_${DateTime.now().millisecondsSinceEpoch}',
+           parentId: parentId,
+           bounds: bounds,
+           depth: parentId != null ? (spatialRegistry.getNode(parentId)?.depth ?? 0) + 1 : 0,
+           orderIndex: 0,
+           semanticType: parentId == null ? SemanticType.root : SemanticType.expansion,
+        );
+        spatialRegistry.registerNode(node);
+        
+        // --- COGNITIVE SPATIAL OS: Camera Perception ---
+        EventBus().publish(EventType.aiTaskCompleted, {'intent': CameraIntent.hardFocus});
       }
     }
 
@@ -1180,72 +1417,73 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           ),
           child: Column(
             children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(color: Colors.grey.withOpacity(0.15)),
-                  ),
-                ),
+              // Header with Tutor Mode Selector
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFD6E4FF),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.palette_outlined,
-                        color: Color(0xFF1E40AF),
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
                     const Text(
-                      'Vinci',
+                      'Vinci Agent',
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
                       ),
                     ),
                     const Spacer(),
                     PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_horiz, color: Colors.black54),
-                      onSelected: (val) {
-                        if (val == 'clear') {
+                      icon: const Icon(Icons.more_vert, color: Colors.black54, size: 20),
+                      onSelected: (value) {
+                        if (value == 'clear') {
                           ref.read(aiChatProvider.notifier).clear();
+                        } else if (value.startsWith('mode_')) {
+                          final modeName = value.split('_')[1];
+                          final mode = AiTutorMode.values.firstWhere((m) => m.name == modeName);
+                          setState(() => _selectedTutorMode = mode);
                         }
                       },
                       itemBuilder: (context) => [
                         const PopupMenuItem(
                           value: 'clear',
-                          child: Text('Clear all'),
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                              SizedBox(width: 8),
+                              Text('Clear Chat', style: TextStyle(color: Colors.redAccent)),
+                            ],
+                          ),
                         ),
+                        const PopupMenuDivider(),
+                        ...AiTutorMode.values.map((mode) => PopupMenuItem(
+                          value: 'mode_${mode.name}',
+                          child: Row(
+                            children: [
+                              Icon(
+                                _selectedTutorMode == mode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                                size: 20,
+                                color: _selectedTutorMode == mode ? Colors.blueAccent : Colors.grey,
+                              ),
+                              const SizedBox(width: 8),
+                              Text('${mode.name.toUpperCase()} Mode'),
+                            ],
+                          ),
+                        )).toList(),
                       ],
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, color: Colors.black54),
-                      onPressed: () {
-                        if (widget.onClose != null) {
-                          widget.onClose!();
-                        } else {
-                          Navigator.pop(context);
-                        }
-                      },
+                      icon: const Icon(Icons.close, color: Colors.black54, size: 20),
+                      onPressed: () => widget.onClose?.call(),
+                      tooltip: 'Close',
                     ),
                   ],
                 ),
               ),
+              const Divider(height: 1),
 
               // Chat Messages
               Expanded(
                 child: ListView.builder(
+                  controller: _scrollController,
                   padding: const EdgeInsets.all(16),
                   itemCount: messages.length + (_isTyping ? 1 : 0),
                   itemBuilder: (context, index) {
@@ -1370,30 +1608,62 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: TextField(
-                        controller: _textController,
-                        decoration: const InputDecoration(
-                          hintText: 'Ask Vinci to do something',
-                          hintStyle: TextStyle(color: Colors.black54),
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF4F4F5),
+                          borderRadius: BorderRadius.circular(20),
                         ),
-                        onSubmitted: (_) => _sendMessage(),
+                        child: Focus(
+                          onKeyEvent: (node, event) {
+                            if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
+                              final isShift = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+                                              HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
+                              if (!isShift) {
+                                // Defer the submit slightly to allow Focus to consume the event fully
+                                Future.microtask(_sendMessage);
+                                return KeyEventResult.handled;
+                              }
+                            }
+                            return KeyEventResult.ignored;
+                          },
+                          child: TextField(
+                            controller: _textController,
+                          minLines: 1,
+                          maxLines: 5,
+                          textInputAction: TextInputAction.newline,
+                          decoration: InputDecoration(
+                            hintText: 'Ask Vinci to do something',
+                            hintStyle: const TextStyle(color: Colors.black54),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            suffixIcon: _textController.text.isNotEmpty
+                                ? IconButton(
+                                    icon: const Icon(Icons.close, size: 18, color: Colors.black54),
+                                    onPressed: () {
+                                      _textController.clear();
+                                      setState(() {});
+                                    },
+                                  )
+                                : null,
+                          ),
+                        ),
+                        ), // Close Focus
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: const BoxDecoration(
-                        color: Colors.black,
+                      decoration: BoxDecoration(
+                        color: _isTyping ? Colors.red.shade600 : Colors.black,
                         shape: BoxShape.circle,
                       ),
                       child: IconButton(
-                        icon: const Icon(
-                          Icons.arrow_upward,
+                        icon: Icon(
+                          _isTyping ? Icons.stop : Icons.arrow_upward,
                           color: Colors.white,
-                          size: 18,
+                          size: 20,
                         ),
-                        onPressed: _sendMessage,
+                        onPressed: _isTyping ? () => setState(() => _cancelRequested = true) : _sendMessage,
+                        tooltip: _isTyping ? 'Stop Generation' : 'Send',
                       ),
                     ),
                   ],

@@ -12,6 +12,8 @@ class SketchTemplates {
     switch (templateName.toLowerCase()) {
       case 'frog':
         return _getFrogPath(mode, x, y, size);
+      case 'dog':
+        return _getDogPath(mode, x, y, size);
       case 'car':
         return _getCarPath(mode, x, y, size);
       case 'house':
@@ -19,10 +21,46 @@ class SketchTemplates {
       case 'tree':
         return _getTreePath(mode, x, y, size);
       default:
-        return _getFrogPath(mode, x, y, size); // fallback
+        return _getFallbackPath(mode, x, y, size);
     }
   }
+  static Path _getFallbackPath(ArtStyleMode mode, double x, double y, double size) {
+    Path path = Path();
+    path.addRect(Rect.fromCenter(center: Offset(x, y), width: size, height: size));
+    path.moveTo(x - size/4, y - size/4);
+    path.lineTo(x + size/4, y + size/4);
+    path.moveTo(x + size/4, y - size/4);
+    path.lineTo(x - size/4, y + size/4);
+    return path;
+  }
 
+  static Path _getDogPath(ArtStyleMode mode, double x, double y, double size) {
+    Path path = Path();
+    double s = size / 100.0;
+    
+    // Simple dog face
+    // Head
+    path.addOval(Rect.fromCenter(center: Offset(x, y), width: 60 * s, height: 60 * s));
+    
+    // Ears
+    path.addOval(Rect.fromCenter(center: Offset(x - 30 * s, y - 20 * s), width: 20 * s, height: 40 * s));
+    path.addOval(Rect.fromCenter(center: Offset(x + 30 * s, y - 20 * s), width: 20 * s, height: 40 * s));
+    
+    // Eyes
+    path.addOval(Rect.fromCenter(center: Offset(x - 12 * s, y - 5 * s), width: 8 * s, height: 8 * s));
+    path.addOval(Rect.fromCenter(center: Offset(x + 12 * s, y - 5 * s), width: 8 * s, height: 8 * s));
+    
+    // Nose
+    path.addOval(Rect.fromCenter(center: Offset(x, y + 10 * s), width: 12 * s, height: 8 * s));
+    
+    // Mouth
+    path.moveTo(x, y + 14 * s);
+    path.quadraticBezierTo(x - 10 * s, y + 25 * s, x - 15 * s, y + 20 * s);
+    path.moveTo(x, y + 14 * s);
+    path.quadraticBezierTo(x + 10 * s, y + 25 * s, x + 15 * s, y + 20 * s);
+    
+    return path;
+  }
   static Path _getFrogPath(ArtStyleMode mode, double x, double y, double size) {
     Path path = Path();
     double s = size / 100.0; // scale factor

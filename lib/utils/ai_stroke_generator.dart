@@ -93,4 +93,82 @@ class AiStrokeGenerator {
       text: text,
     );
   }
+
+  static Stroke generateEllipse(
+    double cx,
+    double cy,
+    double rx,
+    double ry,
+    Color color,
+    double size,
+  ) {
+    List<Offset> points = [];
+    int segments = 40;
+    for (int i = 0; i <= segments; i++) {
+      double angle = 2 * pi * (i / segments);
+      points.add(Offset(cx + rx * cos(angle), cy + ry * sin(angle)));
+    }
+    return Stroke(
+      points: points,
+      color: color,
+      size: size,
+      toolType: ToolType.pen,
+    );
+  }
+
+  static Stroke generateBezierCurve(
+    Offset p0,
+    Offset p1,
+    Offset p2,
+    Offset p3,
+    Color color,
+    double size,
+  ) {
+    List<Offset> points = [];
+    int segments = 30;
+    for (int i = 0; i <= segments; i++) {
+      double t = i / segments;
+      double u = 1.0 - t;
+      double tt = t * t;
+      double uu = u * u;
+      double uuu = uu * u;
+      double ttt = tt * t;
+
+      double x = uuu * p0.dx + 3 * uu * t * p1.dx + 3 * u * tt * p2.dx + ttt * p3.dx;
+      double y = uuu * p0.dy + 3 * uu * t * p1.dy + 3 * u * tt * p2.dy + ttt * p3.dy;
+      points.add(Offset(x, y));
+    }
+    return Stroke(
+      points: points,
+      color: color,
+      size: size,
+      toolType: ToolType.pen,
+    );
+  }
+
+  static Stroke generateOrganicPath(
+    List<Offset> basePoints,
+    double noiseLevel,
+    Color color,
+    double size,
+  ) {
+    if (basePoints.isEmpty) return Stroke(points: [], color: color, size: size, toolType: ToolType.pen);
+    final rand = Random();
+    List<Offset> noisyPoints = [];
+    for (var pt in basePoints) {
+      double dx = (rand.nextDouble() * 2 - 1) * noiseLevel;
+      double dy = (rand.nextDouble() * 2 - 1) * noiseLevel;
+      noisyPoints.add(Offset(pt.dx + dx, pt.dy + dy));
+    }
+    // Close path smoothly if it's meant to be closed
+    if (basePoints.first == basePoints.last && noisyPoints.length > 1) {
+       noisyPoints.last = noisyPoints.first;
+    }
+    return Stroke(
+      points: noisyPoints,
+      color: color,
+      size: size,
+      toolType: ToolType.pen,
+    );
+  }
 }

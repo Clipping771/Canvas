@@ -193,6 +193,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   );
                 },
           ),
+          const SizedBox(height: 24),
+          const Text(
+            'Keyboard Shortcuts',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            title: const Text('Enable Copy/Paste Shortcuts'),
+            subtitle: const Text('Use Ctrl+C, Ctrl+V, and Ctrl+D on the canvas'),
+            value: state.enableKeyboardShortcuts,
+            onChanged: (bool value) {
+              ref.read(settingsProvider.notifier).setEnableKeyboardShortcuts(value);
+            },
+            contentPadding: EdgeInsets.zero,
+          ),
         ],
       ),
     );

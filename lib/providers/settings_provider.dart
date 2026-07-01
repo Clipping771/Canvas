@@ -11,6 +11,7 @@ class SettingsState {
   final String selectedFont;
   final ArtStyleMode artStyleMode;
   final String responseFormat;
+  final bool enableKeyboardShortcuts;
 
   SettingsState({
     this.apiKeys = const {},
@@ -19,6 +20,7 @@ class SettingsState {
     this.selectedFont = 'Inter',
     this.artStyleMode = ArtStyleMode.detailed,
     this.responseFormat = 'Default',
+    this.enableKeyboardShortcuts = true,
   });
 
   SettingsState copyWith({
@@ -28,6 +30,7 @@ class SettingsState {
     String? selectedFont,
     ArtStyleMode? artStyleMode,
     String? responseFormat,
+    bool? enableKeyboardShortcuts,
   }) {
     return SettingsState(
       apiKeys: apiKeys ?? this.apiKeys,
@@ -36,6 +39,7 @@ class SettingsState {
       selectedFont: selectedFont ?? this.selectedFont,
       artStyleMode: artStyleMode ?? this.artStyleMode,
       responseFormat: responseFormat ?? this.responseFormat,
+      enableKeyboardShortcuts: enableKeyboardShortcuts ?? this.enableKeyboardShortcuts,
     );
   }
 }
@@ -76,6 +80,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
             ? ArtStyleMode.illustration
             : ArtStyleMode.cute;
     final savedResponseFormat = _prefs.getString('response_format') ?? 'Default';
+    final savedShortcuts = _prefs.getBool('enable_shortcuts') ?? true;
 
     state = state.copyWith(
       apiKeys: keys,
@@ -84,6 +89,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
       selectedFont: savedFont,
       artStyleMode: artStyleMode,
       responseFormat: savedResponseFormat,
+      enableKeyboardShortcuts: savedShortcuts,
     );
   }
 
@@ -123,6 +129,11 @@ class SettingsNotifier extends Notifier<SettingsState> {
   Future<void> setResponseFormat(String format) async {
     await _prefs.setString('response_format', format);
     state = state.copyWith(responseFormat: format);
+  }
+
+  Future<void> setEnableKeyboardShortcuts(bool enable) async {
+    await _prefs.setBool('enable_shortcuts', enable);
+    state = state.copyWith(enableKeyboardShortcuts: enable);
   }
 
   String? getApiKey(AiProvider provider) {

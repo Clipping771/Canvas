@@ -32,25 +32,31 @@ class AiAgentService {
     historySection += "------------------------------------------\n";
 
     String liveContext = "";
-    final fullContext =
-        "${prompt.toLowerCase()} ${chatHistory.map((e) => e['text'] ?? '').join(" ").toLowerCase()}";
-    if (fullContext.contains("temp") || fullContext.contains("weather")) {
+    
+    // Only look at the current prompt and the very last message to prevent being permanently stuck in weather mode
+    final lastMessage = chatHistory.isNotEmpty ? chatHistory.last['text']?.toLowerCase() ?? '' : '';
+    final recentContext = "${prompt.toLowerCase()} $lastMessage";
+    
+    if (recentContext.contains("temp") || recentContext.contains("weather") || recentContext.contains("forecast") || recentContext.contains("rain") || recentContext.contains("sun")) {
       try {
-        // Try regex first
+        // Try regex first (added 'about' to catch "what about dhaka")
         final regex = RegExp(
-          r'(?:in|for|at|of)\s+([a-zA-Z]+)',
+          r'(?:in|for|at|of|about)\s+([a-zA-Z]+)',
           caseSensitive: false,
         );
-        final match = regex.firstMatch(fullContext);
+        final match = regex.firstMatch(prompt.toLowerCase()); // Look in current prompt first
+        final fallbackMatch = regex.firstMatch(recentContext);
+        final actualMatch = match ?? fallbackMatch;
+        
         String? detectedCity;
 
-        if (match != null) {
-          detectedCity = CityMatcher.findBestMatch(match.group(1)!);
+        if (actualMatch != null) {
+          detectedCity = CityMatcher.findBestMatch(actualMatch.group(1)!);
         }
 
-        // If regex fails, fallback to token fuzzy matching
+        // If regex fails, fallback to token fuzzy matching on recent context
         if (detectedCity == null) {
-          final words = fullContext.split(RegExp(r'\W+'));
+          final words = recentContext.split(RegExp(r'\W+'));
           for (final word in words) {
             if (word.length >= 3) {
               final best = CityMatcher.findBestMatch(

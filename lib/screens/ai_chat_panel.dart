@@ -150,13 +150,13 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
         if (responseFormat == 'Formatted') {
           inkBoundsStr =
-              "\n\n[System Note: The existing canvas content is within [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested a 'Formatted' layout. YOU MUST arrange your drawings beautifully in a highly structured, organized grid or symmetric format! DO NOT OVERLAP with existing bounds.]";
+              "\n\n[System Note: The existing canvas content is within [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested a 'Formatted' layout. YOU MUST arrange your drawings beautifully in a highly structured, organized grid or symmetric format starting near [x: $targetXScaled, y: $targetYScaled]. Do not put items extremely far away, keep them closely grouped together but do not obscure the main image!]";
         } else if (responseFormat == 'Random') {
           inkBoundsStr =
-              "\n\n[System Note: The existing canvas content is within [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested a 'Random' layout. YOU MUST scatter your drawings wildly and randomly across the canvas! Use completely random, scattered coordinates for each object.]";
+              "\n\n[System Note: The existing canvas content is within [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested a 'Random' layout. YOU MUST scatter your drawings creatively across the canvas! Avoid placing them too far apart, keep everything within the general viewport area.]";
         } else {
           inkBoundsStr =
-              "\n\n[System Note: The existing canvas content is located within the bounding box [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested the layout position to be '${widget.insertionPosition}'. YOU MUST output absolute coordinates that place your new drawing exactly at [x: $targetXScaled, y: $targetYScaled] to align with their request!]";
+              "\n\n[System Note: The existing canvas content is located within the bounding box [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested the layout position to be '${widget.insertionPosition}'. YOU MUST output absolute coordinates that place your new drawing starting exactly at [x: $targetXScaled, y: $targetYScaled]. If generating multiple items, stack them tightly and logically next to each other so they form a single coherent block! Do not separate them by large distances.]";
         }
       } else {
         canvasTargetCenter = MatrixUtils.transformPoint(

@@ -13,6 +13,8 @@ import '../engine/canvas_widget.dart';
 import '../engine/particle_engine.dart';
 import '../providers/drawing_provider.dart';
 import '../providers/notebook_provider.dart';
+import '../providers/settings_provider.dart';
+import 'package:flutter/services.dart';
 import '../widgets/achievements_dialog.dart';
 import '../models/tool_type.dart';
 import '../models/page.dart';
@@ -362,15 +364,36 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          // Infinite Dynamic Background
-          Container(
-            color:
-                ref.watch(drawingProvider).canvasBackgroundColor ??
-                Colors.white,
-          ),
-          // Environment Background
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          if (!ref.read(settingsProvider).enableKeyboardShortcuts) return KeyEventResult.ignored;
+          if (event is KeyDownEvent) {
+            final isCtrl = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlLeft) ||
+                           HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlRight) ||
+                           HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaLeft) ||
+                           HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaRight);
+                           
+            if (isCtrl) {
+              if (event.logicalKey == LogicalKeyboardKey.keyC || event.logicalKey == LogicalKeyboardKey.keyD) {
+                // Duplicate selection for both Ctrl+C and Ctrl+D for seamless UX
+                ref.read(drawingProvider.notifier).duplicateSelection();
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyV) {
+                _pasteImage();
+                return KeyEventResult.handled;
+              }
+            }
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Stack(
+          children: [
+            // Infinite Dynamic Background
+            Container(
+              color: ref.watch(drawingProvider).canvasBackgroundColor ?? Colors.white,
+            ),
+            // Environment Background
           AnimatedContainer(
             duration: const Duration(seconds: 2),
             curve: Curves.easeInOut,
@@ -513,6 +536,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
             ),
         ],
       ),
+    ),
     );
   }
 

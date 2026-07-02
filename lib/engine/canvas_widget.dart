@@ -48,7 +48,7 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
 
     return InteractiveViewer(
       transformationController: transformationController,
-      panEnabled: drawingState.currentTool == ToolType.pan,
+      panEnabled: true,
       scaleEnabled: true,
       minScale: 0.00001, // Practically infinite zoom out
       maxScale: 10000.0, // Practically infinite zoom in

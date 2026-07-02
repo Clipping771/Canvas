@@ -975,13 +975,13 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         }
 
         // Robustly parse size
-        double size = 1.0;
+        double size = 8.0; // Default to 16.0 / 2.0
         try {
           final rawSize = action['size'];
           if (rawSize is num) {
             size = rawSize.toDouble() / 2.0;
           } else if (rawSize is String) {
-            size = (double.tryParse(rawSize) ?? 2.0) / 2.0;
+            size = (double.tryParse(rawSize) ?? 16.0) / 2.0;
           }
         } catch (_) {}
         if (type == 'draw_rect') {

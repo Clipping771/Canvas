@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 import 'dart:math' as math;
@@ -23,23 +24,20 @@ import '../engine/weight_controller.dart';
 import '../engine/semantic_camera.dart';
 import '../providers/spatial_registry_provider.dart';
 import '../core/event_bus.dart';
+import '../engine/cognitive/cognitive_runtime.dart';
+import '../engine/cognitive/avatar_engine.dart';
 
 class AiChatPanel extends ConsumerStatefulWidget {
   final VoidCallback? onDrawStart;
   final void Function(double? maxY)? onDrawEnd;
   final VoidCallback? onClose;
   final Matrix4? Function()? getTransform;
-  final String insertionPosition;
-  final Function(Offset)? onCameraFocusRequired;
-
   const AiChatPanel({
     super.key,
     this.onDrawStart,
     this.onDrawEnd,
     this.onClose,
     this.getTransform,
-    this.insertionPosition = 'Bottom',
-    this.onCameraFocusRequired,
   });
 
   @override
@@ -52,6 +50,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
   bool _isTyping = false;
   bool _cancelRequested = false;
   AiTutorMode _selectedTutorMode = AiTutorMode.normal;
+  Completer<String>? _cancelCompleter;
+
+  StreamSubscription? _cancelSub;
 
   @override
   void initState() {
@@ -59,12 +60,21 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     _textController.addListener(() {
       setState(() {}); // For dynamic clear button
     });
+    _cancelSub = EventBus().subscribe(EventType.cancelGeneration, (_) {
+      if (_isTyping) {
+        setState(() => _cancelRequested = true);
+        if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
+          _cancelCompleter!.complete("Cancelled by user");
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
     _textController.dispose();
     _scrollController.dispose();
+    _cancelSub?.cancel();
     super.dispose();
   }
 
@@ -92,12 +102,21 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     _textController.clear();
     chatNotifier.addMessage({'sender': 'user', 'text': text});
     _scrollToBottom();
+    
+    _cancelCompleter = Completer<String>();
 
     setState(() {
       _isTyping = true;
       _cancelRequested = false;
     });
     drawingNotifier.setAiStatus('Thinking');
+    
+    CognitiveRuntime().avatarEngine.setState(AvatarState.thinking);
+    final screenSize = MediaQuery.of(context).size;
+    final transform = widget.getTransform?.call() ?? Matrix4.identity();
+    final inverse = Matrix4.copy(transform)..invert();
+    final canvasCenterPos = MatrixUtils.transformPoint(inverse, Offset(screenSize.width / 2, screenSize.height / 2));
+    CognitiveRuntime().avatarEngine.moveTo(canvasCenterPos);
 
     try {
       final settings = ref.read(settingsProvider);
@@ -111,7 +130,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
       final transform = currentTransform ?? Matrix4.identity();
       final scale = transform.getMaxScaleOnAxis();
-      final pixelRatio = 1.0;
+      // COMPRESSION: Send low-res image to AI to reduce latency and token usage
+      final pixelRatio = 0.5;
 
       final imageBytes = await CanvasExporter.exportStrokesToImage(
         strokes,
@@ -156,6 +176,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
       String inkBoundsStr = "";
       Offset? canvasTargetCenter;
+      Offset? targetTopLeft;
       
       if (minX != double.infinity) {
         final scaledMinX = (minX * pixelRatio).toInt();
@@ -179,8 +200,18 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           MatrixUtils.transformPoint(inverse, Offset(screenSize.width, screenSize.height))
         );
         
+        // Calculate scene bounds for the layout engine fallback
+        double sceneMinX = double.infinity, sceneMinY = double.infinity;
+        double sceneMaxX = double.negativeInfinity, sceneMaxY = double.negativeInfinity;
+        for (var stroke in strokes) {
+          if (stroke.bounds.left < sceneMinX) sceneMinX = stroke.bounds.left;
+          if (stroke.bounds.top < sceneMinY) sceneMinY = stroke.bounds.top;
+          if (stroke.bounds.right > sceneMaxX) sceneMaxX = stroke.bounds.right;
+          if (stroke.bounds.bottom > sceneMaxY) sceneMaxY = stroke.bounds.bottom;
+        }
+        
         final parentBounds = parentId != null ? spatialRegistry.getParentBounds(parentId) : 
-            Rect.fromLTRB(minX, minY, maxX, maxY); // Fallback to raw selection bounds
+            Rect.fromLTRB(sceneMinX, sceneMinY, sceneMaxX, sceneMaxY); // Use scene coordinates!
             
         final optimalOffset = spatialRegistry.state.layoutEngine.computeOptimalPlacement(
           nodeSize: const Size(400, 400), // Estimated generation size
@@ -190,49 +221,32 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           groupId: 'pending_ai_task',
         );
 
-        canvasTargetCenter = optimalOffset + const Offset(200, 200); // Center of estimated bounds
+        targetTopLeft = optimalOffset; 
+        canvasTargetCenter = optimalOffset + const Offset(400, 200); // Center camera on the text block
         
         final viewportTarget = MatrixUtils.transformPoint(transform, optimalOffset);
         final targetX = viewportTarget.dx;
         final targetY = viewportTarget.dy;
-        
-        if (widget.onCameraFocusRequired != null) {
-          widget.onCameraFocusRequired!(canvasTargetCenter);
-        }
         
         drawingNotifier.setAiStatus('Thinking', target: canvasTargetCenter);
 
         final targetXScaled = (targetX * pixelRatio).toInt();
         final targetYScaled = (targetY * pixelRatio).toInt();
 
-        final responseFormat = ref.read(settingsProvider).responseFormat;
-
-        if (responseFormat == 'Formatted') {
-          inkBoundsStr =
-              "\n\n[System Note: The existing canvas content is within [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested a 'Formatted' layout. YOU MUST arrange your drawings beautifully in a highly structured, organized grid or symmetric format starting near [x: $targetXScaled, y: $targetYScaled]. Do not put items extremely far away, keep them closely grouped together but do not obscure the main image!]";
-        } else if (responseFormat == 'Random') {
-          inkBoundsStr =
-              "\n\n[System Note: The existing canvas content is within [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested a 'Random' layout. YOU MUST scatter your drawings creatively across the canvas! Avoid placing them too far apart, keep everything within the general viewport area.]";
-        } else {
-          inkBoundsStr =
-              "\n\n[System Note: The existing canvas content is located within the bounding box [minX: $scaledMinX, minY: $scaledMinY, maxX: $scaledMaxX, maxY: $scaledMaxY]. The user requested the layout position to be '${widget.insertionPosition}'. YOU MUST output absolute coordinates that place your new drawing starting exactly at [x: $targetXScaled, y: $targetYScaled]. If generating multiple items, stack them tightly and logically next to each other so they form a single coherent block! Do not separate them by large distances.]";
-        }
+        inkBoundsStr =
+            "\n\n[System Note: If you are answering a general question or creating a new conversational response, YOU MUST place it exactly at coordinates X=${targetTopLeft.dx.toInt()}, Y=${targetTopLeft.dy.toInt()}. This is the layout engine's designated spot for your new response. HOWEVER, if the user asks you to modify, paint, fill, circle, or interact with an existing object (like a bottle, drawing, etc), YOU MUST use that object's exact original coordinates from the canvas to place your drawing precisely over or inside it. DO NOT assume (0,0) for anything.]";
       } else {
         final targetX = screenSize.width / 2.0;
         final targetY = screenSize.height / 2.0;
         canvasTargetCenter = MatrixUtils.transformPoint(
             Matrix4.copy(transform)..invert(),
             Offset(targetX, targetY));
+        
+        targetTopLeft = canvasTargetCenter;
             
-        if (widget.onCameraFocusRequired != null) {
-          widget.onCameraFocusRequired!(canvasTargetCenter);
-        }
         drawingNotifier.setAiStatus('Thinking', target: canvasTargetCenter);
         
-        final targetXScaled = (targetX * pixelRatio).toInt();
-        final targetYScaled = (targetY * pixelRatio).toInt();
-        
-        inkBoundsStr = "\n\n[System Note: The canvas is currently empty. YOU MUST output absolute coordinates that place your new drawing starting exactly at the center of the viewport: [x: $targetXScaled, y: $targetYScaled]. Do not put items extremely far away.]";
+        inkBoundsStr = "\n\n[System Note: The canvas is currently empty. Place your response exactly at coordinates X=${targetTopLeft!.dx.toInt()}, Y=${targetTopLeft!.dy.toInt()}.]";
       }
 
       final scaledWidth = (screenSize.width * pixelRatio).toInt();
@@ -249,26 +263,98 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           ? drawingState.selectedStrokes 
           : drawingState.strokes;
 
+      // Token Compression: Only send meaningful semantic objects or grouped objects.
+      // For raw loose strokes, we will compute spatial clusters so distinct drawings aren't merged!
       final canvasObjects = <Map<String, dynamic>>[];
+      final rawStrokes = <Stroke>[];
+
       for (var s in targetStrokes) {
         final screenRect = MatrixUtils.transformRect(transform, s.bounds);
         
         // Viewport Slicing (skip if not on screen and not explicitly selected)
         if (drawingState.selectedStrokes.isEmpty && !viewportRect.overlaps(screenRect)) {
-           continue; // Token compression: skip off-screen objects
+           continue; 
+        }
+
+        if (s.groupId != null || s.semanticMeaning != null || s.toolType != ToolType.pen) {
+          canvasObjects.add({
+            'id': s.id,
+            'groupId': s.groupId,
+            'type': s.semanticMeaning ?? s.toolType.toString().split('.').last,
+            'bounds': [
+              (screenRect.left * pixelRatio).toInt(),
+              (screenRect.top * pixelRatio).toInt(),
+              (screenRect.width * pixelRatio).toInt(),
+              (screenRect.height * pixelRatio).toInt(),
+            ],
+          });
+        } else {
+          rawStrokes.add(s);
+        }
+      }
+
+      if (rawStrokes.isNotEmpty) {
+        List<List<Stroke>> clusters = [];
+        for (var s in rawStrokes) {
+          final sBounds = MatrixUtils.transformRect(transform, s.bounds).inflate(20.0);
+          bool foundCluster = false;
+          for (var cluster in clusters) {
+            Rect clusterBounds = MatrixUtils.transformRect(transform, cluster.first.bounds);
+            for (int i = 1; i < cluster.length; i++) {
+              clusterBounds = clusterBounds.expandToInclude(MatrixUtils.transformRect(transform, cluster[i].bounds));
+            }
+            if (sBounds.overlaps(clusterBounds.inflate(20.0))) {
+              cluster.add(s);
+              foundCluster = true;
+              break;
+            }
+          }
+          if (!foundCluster) {
+            clusters.add([s]);
+          }
         }
         
-        canvasObjects.add({
-          'id': s.id,
-          'groupId': s.groupId,
-          'type': s.semanticMeaning ?? s.toolType.toString(), // Concept Extraction prep
-          'bounds': [
-            (screenRect.left * pixelRatio).toInt(),
-            (screenRect.top * pixelRatio).toInt(),
-            (screenRect.width * pixelRatio).toInt(),
-            (screenRect.height * pixelRatio).toInt(),
-          ],
-        });
+        // Greedy merge overlapping clusters
+        bool merged;
+        do {
+          merged = false;
+          for (int i = 0; i < clusters.length; i++) {
+            for (int j = i + 1; j < clusters.length; j++) {
+              Rect b1 = MatrixUtils.transformRect(transform, clusters[i].first.bounds);
+              for (int k = 1; k < clusters[i].length; k++) b1 = b1.expandToInclude(MatrixUtils.transformRect(transform, clusters[i][k].bounds));
+              
+              Rect b2 = MatrixUtils.transformRect(transform, clusters[j].first.bounds);
+              for (int k = 1; k < clusters[j].length; k++) b2 = b2.expandToInclude(MatrixUtils.transformRect(transform, clusters[j][k].bounds));
+              
+              if (b1.inflate(20.0).overlaps(b2.inflate(20.0))) {
+                clusters[i].addAll(clusters[j]);
+                clusters.removeAt(j);
+                merged = true;
+                break;
+              }
+            }
+            if (merged) break;
+          }
+        } while (merged);
+        
+        for (var cluster in clusters) {
+          Rect b = MatrixUtils.transformRect(transform, cluster.first.bounds);
+          for (int i = 1; i < cluster.length; i++) {
+            b = b.expandToInclude(MatrixUtils.transformRect(transform, cluster[i].bounds));
+          }
+          
+          canvasObjects.add({
+            'type': 'raw_handwriting_or_sketch',
+            'stroke_count': cluster.length,
+            'ids': cluster.map((e) => e.id).toList(),
+            'bounds': [
+              (b.left * pixelRatio).toInt(),
+              (b.top * pixelRatio).toInt(),
+              (b.width * pixelRatio).toInt(),
+              (b.height * pixelRatio).toInt(),
+            ],
+          });
+        }
       }
 
       // --- Deterministic Gate Engine (Layer 1) ---
@@ -293,18 +379,25 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
       final chatHistory = ref.read(aiChatProvider).messages;
       final currentSettings = ref.read(settingsProvider);
-      final response = await AiAgentService.askAgent(
-        imageBytes: imageBytes ?? [],
-        prompt: augmentedPrompt,
-        provider: provider,
-        apiKey: apiKey,
-        modelId: modelId,
-        chatHistory: chatHistory,
-        canvasObjects: canvasObjects,
-        baseAmbiguityScore: baseAmbiguityScore,
-        tutorMode: _selectedTutorMode,
-        artStyleMode: currentSettings.artStyleMode,
-      );
+      
+      final response = await Future.any([
+        AiAgentService.askAgent(
+          imageBytes: imageBytes ?? [],
+          prompt: augmentedPrompt,
+          provider: provider,
+          apiKey: apiKey,
+          modelId: modelId,
+          chatHistory: chatHistory,
+          canvasObjects: canvasObjects,
+          baseAmbiguityScore: baseAmbiguityScore,
+          tutorMode: _selectedTutorMode,
+        ),
+        _cancelCompleter!.future,
+      ]);
+
+      if (response == "Cancelled by user" || _cancelRequested) {
+        throw Exception("Cancelled by user");
+      }
 
       String? diffSummary;
       String? rationaleText;
@@ -419,7 +512,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             // --- Multi-Intent Router & Engine Priority Integration (Phase 1) ---
             // Future integration: MultiIntentRouter().routeOps(actions);
             // For now, executing through legacy block with Safe Mode wrapper.
-            diffSummary = await _executeAiActions(actions);
+            diffSummary = await _executeAiActions(actions, targetTopLeft: targetTopLeft);
             
             if (diffSummary == null || diffSummary.isEmpty) {
                // Normal empty ops behavior, handled gracefully
@@ -445,8 +538,21 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           }
         } catch (e) {
           print("Failed to decode AI JSON: $e");
-          // If it completely fails to parse as JSON, assume it's pure conversational text
           
+          final isJsonAttempt = response.trim().startsWith('{') || response.trim().startsWith('```');
+          String textToDraw = response.trim();
+          
+          if (isJsonAttempt) {
+             // It's a malformed JSON. Don't draw the raw JSON code on the canvas!
+             // Let's try to extract just the message field using regex
+             final msgMatch = RegExp(r'"message"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"').firstMatch(response);
+             if (msgMatch != null) {
+                textToDraw = msgMatch.group(1)!.replaceAll(r'\"', '"').replaceAll(r'\n', '\n');
+             } else {
+                textToDraw = "Oops! I had a little hiccup formatting my thoughts.";
+             }
+          }
+
           final screenSize = MediaQuery.of(context).size;
           drawingNotifier.setAiStatus('Working');
           
@@ -457,7 +563,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
           List actions = [{
             "action": "draw_text",
-            "text": response.trim(),
+            "text": textToDraw,
             "position": [
               viewportTarget.dx - 150.0,
               viewportTarget.dy,
@@ -467,7 +573,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           }];
 
           drawingNotifier.setAiStatus('Working', target: catchTargetCenter);
-          await _executeAiActions(actions, targetCenter: catchTargetCenter);
+          await _executeAiActions(actions, targetTopLeft: catchTargetCenter);
         }
       }
 
@@ -486,13 +592,14 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         setState(() => _isTyping = false);
       }
       drawingNotifier.setAiStatus(null);
+      CognitiveRuntime().avatarEngine.setState(AvatarState.idle);
     }
   }
 
   Future<String> _executeAiActions(
     List actions, {
     bool isAnimateFrame = false,
-    Offset? targetCenter,
+    Offset? targetTopLeft,
   }) async {
     if (!mounted) return "";
     final drawingNotifier = ref.read(drawingProvider.notifier);
@@ -513,9 +620,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     }
 
     Offset mapPoint(double x, double y) {
-      // Divide by pixelRatio = 1.0 used in CanvasExporter
-      final scaledX = x / 1.0;
-      final scaledY = y / 1.0;
+      // Divide by the same pixelRatio used in CanvasExporter (0.5)
+      final scaledX = x / 0.5;
+      final scaledY = y / 0.5;
       final point = MatrixUtils.transformPoint(
         inverse,
         Offset(scaledX, scaledY),
@@ -534,11 +641,11 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           objectsUpdated++; // Prevent fallback
           continue;
         } else if (type == 'update') {
-          final targetId = action['targetId'] as String?;
-          final targetGroupId = action['targetGroupId'] as String?;
-          final patch = action['patch'] as Map<String, dynamic>?;
+          final targetId = action['targetId']?.toString();
+          final targetGroupId = action['targetGroupId']?.toString();
+          final patch = action['patch'] is Map ? action['patch'] as Map : null;
           if (patch != null && (targetId != null || targetGroupId != null)) {
-            final colorHex = patch['color'] as String?;
+            final colorHex = patch['color']?.toString();
             Color? patchColor;
             if (colorHex != null) {
               try {
@@ -549,11 +656,20 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                 } else if (colorHex.startsWith('0x') || colorHex.startsWith('0X')) {
                   patchColor = Color(int.parse(colorHex.substring(2), radix: 16));
                 } else {
-                  patchColor = Color(int.parse(colorHex));
+                  // Fallback for named colors if they hallucinate
+                  if (colorHex.toLowerCase() == 'red') patchColor = Colors.red;
+                  else if (colorHex.toLowerCase() == 'blue') patchColor = Colors.blue;
+                  else if (colorHex.toLowerCase() == 'green') patchColor = Colors.green;
+                  else if (colorHex.toLowerCase() == 'yellow') patchColor = Colors.yellow;
+                  else if (colorHex.toLowerCase() == 'black') patchColor = Colors.black;
+                  else if (colorHex.toLowerCase() == 'white') patchColor = Colors.white;
+                  else patchColor = Color(int.parse(colorHex));
                 }
               } catch (_) {}
             }
-            final isFilled = patch['isFilled'] as bool?;
+            final isFilled = patch['isFilled'] is bool 
+                ? patch['isFilled'] as bool 
+                : (patch['isFilled']?.toString().toLowerCase() == 'true');
 
             Stroke updater(Stroke s) {
               return s.copyWith(color: patchColor, isFilled: isFilled);
@@ -573,8 +689,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           }
           continue;
         } else if (type == 'remove') {
-          final targetId = action['targetId'] as String?;
-          final targetGroupId = action['targetGroupId'] as String?;
+          final targetId = action['targetId']?.toString();
+          final targetGroupId = action['targetGroupId']?.toString();
           if (targetId != null || targetGroupId != null) {
             final ids = <String>[];
             if (targetId != null) ids.add(targetId);
@@ -583,8 +699,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           }
           continue;
         } else if (type == 'tag') {
-          final ids = (action['ids'] as List?)?.cast<String>();
-          final name = action['name'] as String?;
+          final ids = action['ids'] is List ? (action['ids'] as List).map((e) => e.toString()).toList() : null;
+          final name = action['name']?.toString();
           if (ids != null && name != null && ids.isNotEmpty) {
             objectsUpdated += drawingNotifier.tagStrokes(ids, name);
           }
@@ -620,14 +736,21 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           }
           continue;
         } else if (type == 'change_background') {
-          final colorHex = action['color'] as String?;
+          final colorHex = action['color']?.toString();
           if (colorHex != null) {
             Color? color;
             try {
               if (colorHex.startsWith('#')) {
                 color = Color(int.parse(colorHex.substring(1), radix: 16) + 0xFF000000);
               } else {
-                color = Color(int.parse(colorHex));
+                // Fallback for named colors
+                if (colorHex.toLowerCase() == 'red') color = Colors.red;
+                else if (colorHex.toLowerCase() == 'blue') color = Colors.blue;
+                else if (colorHex.toLowerCase() == 'green') color = Colors.green;
+                else if (colorHex.toLowerCase() == 'yellow') color = Colors.yellow;
+                else if (colorHex.toLowerCase() == 'black') color = Colors.black;
+                else if (colorHex.toLowerCase() == 'white') color = Colors.white;
+                else color = Color(int.parse(colorHex));
               }
             } catch (_) {}
             
@@ -642,30 +765,86 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               (action['effect'] ??
                       action['effectName'] ??
                       action['name'] ??
-                      action['type'])
-                  as String?;
+                      action['type'])?.toString();
           if (effect != null) {
             drawingNotifier.triggerEasterEgg(effect);
             objectsUpdated++; // Prevent fallback
           }
           continue;
         } else if (type == 'insert_uml') {
-          final umlStr = action['plantuml'] as String?;
+          final umlStr = action['plantuml']?.toString();
           final posData = action['position'] as List?;
-          if (umlStr != null && posData != null && posData.length >= 2) {
-            final p = mapPoint(posData[0].toDouble(), posData[1].toDouble());
+          if (umlStr != null) {
+            double rawX = 100.0, rawY = 100.0;
+            if (targetTopLeft != null) {
+              // ALWAYS use targetTopLeft for new generated diagrams!
+              rawX = targetTopLeft.dx;
+              rawY = targetTopLeft.dy;
+            } else if (posData != null && posData.length >= 2) {
+              rawX = posData[0].toDouble();
+              rawY = posData[1].toDouble();
+            }
+            // If targetTopLeft is used, it's already in canvas coords, but wait: 
+            // In other places we mapPoint targetTopLeft? No, targetTopLeft is passed from canvasTargetCenter which is already inverse mapped.
+            // Wait, actually mapPoint(targetTopLeft.dx, targetTopLeft.dy) would double-inverse it!
+            // Let's just use it directly.
+            final p = targetTopLeft != null 
+                ? targetTopLeft 
+                : mapPoint(rawX, rawY);
+
             final bytes = await PlantUmlService.fetchUmlImage(umlStr);
             if (bytes != null && mounted) {
-              drawingNotifier.insertImage(bytes, p);
-              objectsAdded++; // Prevent fallback text from drawing!
+              try {
+                // Pre-decode the image so the bounding box is correct instantly
+                final decodedImage = await decodeImageFromList(bytes);
+                newStrokes.add(Stroke(
+                  points: [p],
+                  color: Colors.transparent,
+                  size: 1.0,
+                  toolType: ToolType.pan,
+                  imageBytes: bytes,
+                  decodedImage: decodedImage,
+                ));
+              } catch (e) {
+                print("Failed to decode UML image: $e");
+              }
             }
           }
           continue;
+        } else if (type == 'focus_area') {
+          final rectData = action['rect'] as List?;
+          if (rectData != null && rectData.length >= 4) {
+            double x = rectData[0].toDouble();
+            double y = rectData[1].toDouble();
+            double w = rectData[2].toDouble();
+            double h = rectData[3].toDouble();
+            final p1 = mapPoint(x, y);
+            final p2 = mapPoint(x + w, y + h);
+            final focusRect = Rect.fromPoints(p1, p2);
+            
+            drawingNotifier.setLastAddedBounds(focusRect);
+            objectsUpdated++; // Ensure we don't count as fallback
+            
+            // Immediately trigger focus without waiting for drawing
+            EventBus().publish(EventType.aiTaskCompleted, {'intent': CameraIntent.hardFocus});
+          }
+          continue;
         } else if (type == 'insert_widget') {
-          final widgetType = action['type'] as String?;
+          final widgetType = action['type']?.toString();
           final posData = action['position'] as List?;
-          if (widgetType != null && posData != null && posData.length >= 2) {
-            final p = mapPoint(posData[0].toDouble(), posData[1].toDouble());
+          if (widgetType != null) {
+            double rawX = 100.0, rawY = 100.0;
+            if (targetTopLeft != null) {
+              rawX = targetTopLeft.dx;
+              rawY = targetTopLeft.dy;
+            } else if (posData != null && posData.length >= 2) {
+              rawX = posData[0].toDouble();
+              rawY = posData[1].toDouble();
+            }
+            final p = targetTopLeft != null 
+                ? targetTopLeft 
+                : mapPoint(rawX, rawY);
+
             final existingWidgets = drawingNotifier.state.strokes.where((s) {
               if (s.toolType != ToolType.widget || s.text == null) return false;
               try {
@@ -772,7 +951,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           continue;
         }
 
-        final colorStr = action['color'] as String? ?? '0xFF000000';
+        final colorStr = action['color']?.toString() ?? '0xFF000000';
         Color color = const Color(0xFF000000);
         try {
           if (colorStr.startsWith('#')) {
@@ -782,7 +961,14 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           } else if (colorStr.startsWith('0x') || colorStr.startsWith('0X')) {
             color = Color(int.parse(colorStr.substring(2), radix: 16));
           } else {
-            color = Color(int.parse(colorStr));
+            // Fallback for named colors
+            if (colorStr.toLowerCase() == 'red') color = Colors.red;
+            else if (colorStr.toLowerCase() == 'blue') color = Colors.blue;
+            else if (colorStr.toLowerCase() == 'green') color = Colors.green;
+            else if (colorStr.toLowerCase() == 'yellow') color = Colors.yellow;
+            else if (colorStr.toLowerCase() == 'black') color = Colors.black;
+            else if (colorStr.toLowerCase() == 'white') color = Colors.white;
+            else color = Color(int.parse(colorStr));
           }
         } catch (_) {}
 
@@ -1065,7 +1251,6 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
           final p = mapPoint(rawX, rawY);
           final scale = inverse.getMaxScaleOnAxis();
-          final mode = ref.read(settingsProvider).artStyleMode;
 
           final replaceName = action['replace'] as String?;
           if (replaceName != null) {
@@ -1126,12 +1311,12 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             iterations++;
           }
 
+          // Always use a default static style since ArtStyleMode is removed
           final path = SketchTemplates.getPath(
             textName,
-            mode,
             finalX,
             finalY,
-            (size * scale) * 3.0,
+            100.0, // Default base size 100
           );
 
           final isFilled = action['isFilled'] as bool? ?? false;
@@ -1279,8 +1464,10 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       // Removed strict auto-layout. We must trust the AI's spatial coordinates so it can draw things around/next to other objects!
     }
 
-    // INTERCEPT: Automatically shift all newly generated strokes to perfectly align with targetCenter!
-    if (newStrokes.isNotEmpty && targetCenter != null && widget.insertionPosition != 'Formatted' && widget.insertionPosition != 'Random') {
+    // INTERCEPT removed: The AI is now 'smart' enough to handle its own spatial reasoning based on the updated System Note.
+    // It will use targetTopLeft for new chat responses, but original coordinates for object modifications.
+    /*
+    if (newStrokes.isNotEmpty && targetTopLeft != null) {
       double minX = double.infinity, minY = double.infinity;
       double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
       for (var s in newStrokes) {
@@ -1293,8 +1480,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       }
       
       if (minX != double.infinity) {
-        final currentCenter = Offset((minX + maxX) / 2, (minY + maxY) / 2);
-        final shift = targetCenter - currentCenter;
+        final currentTopLeft = Offset(minX, minY);
+        final shift = targetTopLeft - currentTopLeft;
         
         for (int i = 0; i < newStrokes.length; i++) {
           final s = newStrokes[i];
@@ -1303,28 +1490,26 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         }
       }
     }
+    */
 
     double? finalMaxY;
     if (newStrokes.isNotEmpty) {
       double minX = double.infinity, minY = double.infinity;
       double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
       for (var s in newStrokes) {
-        for (var p in s.points) {
-          if (p.dx < minX) minX = p.dx;
-          if (p.dy < minY) minY = p.dy;
-          if (p.dx > maxX) maxX = p.dx;
-
-          double pMaxY = p.dy;
-          if (s.decodedImage != null) {
-            pMaxY += s.decodedImage!.height;
-          } else if (s.text != null)
-            pMaxY += (s.text!.split('\n').length) * s.size * 2.5;
-          if (pMaxY > maxY) maxY = pMaxY;
-        }
+        final b = s.bounds;
+        if (b.left < minX) minX = b.left;
+        if (b.top < minY) minY = b.top;
+        if (b.right > maxX) maxX = b.right;
+        if (b.bottom > maxY) maxY = b.bottom;
       }
       if (maxX != double.negativeInfinity) {
         final bounds = Rect.fromLTRB(minX, minY, maxX, maxY);
         drawingNotifier.setLastAddedBounds(bounds);
+        
+        CognitiveRuntime().avatarEngine.moveTo(bounds.center);
+        CognitiveRuntime().avatarEngine.setState(AvatarState.generating);
+        
         finalMaxY = maxY;
         
         // --- COGNITIVE SPATIAL OS: Graph Registration ---
@@ -1345,9 +1530,12 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         // --- COGNITIVE SPATIAL OS: Camera Perception ---
         EventBus().publish(EventType.aiTaskCompleted, {'intent': CameraIntent.hardFocus});
       }
+    } else if (objectsAdded > 0 || objectsUpdated > 0) {
+       // Also focus if we inserted widgets or images directly
+       EventBus().publish(EventType.aiTaskCompleted, {'intent': CameraIntent.hardFocus});
     }
 
-    if (tweens.isNotEmpty || newStrokes.isNotEmpty) {
+    if (tweens.isNotEmpty || newStrokes.isNotEmpty || objectsAdded > 0) {
       drawingNotifier.setAiStatus(null);
       widget.onDrawStart?.call();
     }
@@ -1365,7 +1553,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       }
     }
 
-    if (mounted && (tweens.isNotEmpty || newStrokes.isNotEmpty)) {
+    if (mounted && (tweens.isNotEmpty || newStrokes.isNotEmpty || objectsAdded > 0)) {
       widget.onDrawEnd?.call(finalMaxY);
     }
 
@@ -1390,6 +1578,10 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isTyping) {
+      return const SizedBox.shrink();
+    }
+
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
     final messages = ref.watch(aiChatProvider).messages;
 
@@ -1662,7 +1854,14 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                           color: Colors.white,
                           size: 20,
                         ),
-                        onPressed: _isTyping ? () => setState(() => _cancelRequested = true) : _sendMessage,
+                        onPressed: _isTyping 
+                            ? () {
+                                setState(() => _cancelRequested = true);
+                                if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
+                                  _cancelCompleter!.complete("Cancelled by user");
+                                }
+                              }
+                            : _sendMessage,
                         tooltip: _isTyping ? 'Stop Generation' : 'Send',
                       ),
                     ),

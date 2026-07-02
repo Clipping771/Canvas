@@ -25,7 +25,6 @@ class AiAgentService {
     required List<Map<String, dynamic>> canvasObjects,
     double baseAmbiguityScore = 0.0,
     AiTutorMode tutorMode = AiTutorMode.normal,
-    ArtStyleMode artStyleMode = ArtStyleMode.detailed,
   }) async {
     if (apiKey.isEmpty) {
       return "Error: Please enter an API key for ${provider.displayName} in Settings first.";
@@ -150,8 +149,6 @@ CRITICAL INSTRUCTION: Your output MUST ALWAYS be a single JSON object in this ex
   ]
 }
 ```
-${artStyleMode == ArtStyleMode.cute ? "CRITICAL ART STYLE OVERRIDE: The user wants CUTE, SIMPLE, CARTOONISH drawings! Use mostly circles, ovals, and very few details. Keep it extremely simple and adorable." : artStyleMode == ArtStyleMode.illustration ? "CRITICAL ART STYLE OVERRIDE: The user wants ILLUSTRATION style drawings! Use sleek, minimal, expressive continuous curves (bezier_curve) and abstract elegant representations. Avoid blocky rectangles." : "CRITICAL ART STYLE OVERRIDE: The user wants HIGHLY DETAILED drawings! Use complex hierarchical graphs with many micro-details (fur, scales, textures, fingers) and organic_paths with noise. Make it extremely detailed!"}
-```
 CRITICAL RULE (GLOBAL AMBIGUITY GATE - STEP 0):
 Evaluate ambiguity against BOTH the current request AND the Structured Memory Window.
 1. High Ambiguity (> 0.7): You MUST set `is_ambiguous_or_underspecified` to true, `decision` to "ask_clarification", and leave `ops` EMPTY. (e.g., "draw a diagram", "make something").
@@ -175,15 +172,16 @@ Supported actions for the "ops" array:
 10. {"action": "undo", "count": 1}
 11. {"action": "tween_area", "rect": [x, y, w, h], "dx": 20, "dy": 0, "scale": 1.0, "rotation": 0.0, "duration_ms": 2000}
 12. {"action": "learn_rule", "rule": "Never draw over the image"}
-13. {"action": "insert_widget", "type": "weather", "city": "London", "position": [x, y]}
-14. {"action": "draw_template", "name": "frog", "position": [x, y], "size": 100, "isFilled": false} (Available names: frog, dog, car, house, tree. STRICTLY DO NOT invent new names!)
-15. {"action": "draw_composite", "name": "cat", "position": [x, y], "scale": 1.0, "parts": [{"type": "ellipse", "name": "head", "cx": 0, "cy": -50, "rx": 30, "ry": 25, "color": "0xFF000000", "details": [{"type": "polygon", "name": "ear_L", "points": [[-20,-70], [-30,-90], [-10,-80]]}]}, {"type": "organic_path", "name": "body", "base_points": [[-20,-20],[20,-20],[20,40],[-20,40]], "noise_level": 5.0}, {"type": "bezier_curve", "name": "tail", "p0": [0,40], "p1": [20,60], "p2": [30,30], "p3": [50,50]}]} (CRITICAL: For complex unlisted objects, you MUST use draw_composite with a Hierarchical Drawing Graph! Break it into Macro 'parts' (body, head) and Micro 'details' (ears, eyes). Valid types: 'circle' (cx,cy,r), 'ellipse' (cx,cy,rx,ry), 'rect' (x,y,w,h), 'line' (x1,y1,x2,y2), 'polygon' (points: [[x,y]...]), 'bezier_curve' (p0, p1, p2, p3), 'organic_path' (base_points, noise_level). Use recursion via 'details' arrays!)
-16. {"action": "draw_svg", "path": "M 10 10 C 20 20, 40 20, 50 10 Z", "position": [x, y], "scale": 1.0, "color": "0xFF00FF00"} (Use ONLY for extremely abstract continuous curves where geometric parts fail.)
+13. {"action": "insert_widget", "type": "weather", "city": "London", "position": [x, y], "days": 3} (You can set days up to 7 if requested)
+14. {"action": "draw_template", "name": "frog", "position": [x, y], "size": 100, "isFilled": false} (CRITICAL: If the user asks for ANY of these exactly: frog, dog, car, house, tree, train, cat, YOU MUST use this action! DO NOT draw them manually using shapes!)
+15. {"action": "draw_composite", "name": "cat", "position": [x, y], "scale": 1.0, "parts": [{"type": "ellipse", "name": "head", "cx": 0, "cy": -50, "rx": 30, "ry": 25, "color": "0xFF000000", "details": [{"type": "polygon", "name": "ear_L", "points": [[-20,-70], [-30,-90], [-10,-80]]}]}, {"type": "organic_path", "name": "body", "base_points": [[-20,-20],[20,-20],[20,40],[-20,40]], "noise_level": 5.0}, {"type": "bezier_curve", "name": "tail", "p0": [0,40], "p1": [20,60], "p2": [30,30], "p3": [50,50]}]} (Use this for highly structural graphs where geometric shapes are needed, or if the user explicitly asks for abstract geometric composition).
+16. {"action": "draw_svg", "path": "M 10 10 C 20 20, 40 20, 50 10 Z", "position": [x, y], "scale": 1.0, "color": "0xFF00FF00"} (CRITICAL MASSIVE CAPABILITY: If the user asks you to draw an object that is NOT in the draw_template list (e.g., 'draw a spaceship', 'draw a laptop', 'draw a dragon', 'draw an eye'), YOU MUST generate a detailed SVG path string representing that object and use this action! You have seen millions of SVG icons in your training, use that knowledge to output a stunning SVG `d` path! Keep the coordinates roughly within a 0-100 viewport and the engine will scale it for you.)
 17. {"action": "update", "targetId": "s_123", "targetGroupId": "tree", "patch": {"color": "0xFF00FF00", "isFilled": true}}
 17. {"action": "remove", "targetId": "s_123", "targetGroupId": "tree"}
 18. {"action": "tag", "ids": ["s_1", "s_2"], "name": "house"}
-19. {"action": "apply_gravity", "targetGroupId": "car"} (Optional: specify targetGroupId to apply gravity to a specific object)
+19. {"action": "apply_gravity", "targetGroupId": "car"} (CRITICAL: If there are multiple objects on the canvas and the user says "add gravity" without specifying which one, you MUST set decision to "ask_clarification" and ask the user which object to apply it to!)
 20. {"action": "insert_uml", "plantuml": "@startuml\n...\n@enduml", "position": [x, y]} (Use ONLY valid PlantUML syntax!)
+21. {"action": "focus_area", "rect": [x, y, w, h]} (CRITICAL: Use this when the user asks you to 'focus' or 'zoom in' or 'look at' a specific object or area of the canvas. Estimate the bounds of the target using the CANVAS SCENE GRAPH data provided!)
 
 CRITICAL UML AND CHARTS RULE: If the user asks for a CHART, GRAPH, WIREFRAME, or MINDMAP, use the `insert_uml` action with valid PlantUML code.
 - Do NOT use `@startsalt` for tables! It looks like a terrible 1990s wireframe and the user hates it!
@@ -224,6 +222,7 @@ CRITICAL INTENTION & PHYSICS INSTRUCTION: You must smartly interpret the user's 
 - "Shrink" / "Vanish" -> `scale`: 0.1
 - "Grow" / "Expand" -> `scale`: 3.0
 - "Gravity" / "Fall" -> YOU MUST use the `apply_gravity` action! Do NOT use `tween_area` for gravity! Do NOT use `draw_text` for gravity!
+CRITICAL ANIMATION AMBIGUITY RULE: If the user asks to animate, move, or apply gravity to something, BUT there are multiple distinct objects on the canvas and they did not specify WHICH object, YOU MUST set `decision` to "ask_clarification" and ask them! (e.g. "Which object should I add gravity to? The car or the tree?")
 Use your intelligence to combine these (e.g. floating away while spinning) and set appropriate `duration_ms` (1000-3000ms).
 CRITICAL WARNING: DO NOT BLINDLY COPY THE EXAMPLE JSON! You MUST estimate the actual pixel coordinates [x, y, w, h] of the objects you see in the provided image based on the canvas size!
 You can output MULTIPLE tween_area commands in your JSON array to move different objects simultaneously!

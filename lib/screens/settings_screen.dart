@@ -122,12 +122,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             'App Appearance',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 24),
-          _buildResponseFormatSelector(state),
+
           const SizedBox(height: 24),
           _buildFontSelector(state),
-          const SizedBox(height: 16),
-          _buildArtStyleSelector(state),
         ],
       ),
     );
@@ -218,142 +215,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Widget _buildArtStyleSelector(SettingsState state) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-          const Text(
-            'AI Drawing Style',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Choose how Vinci draws objects on your canvas.',
-            style: TextStyle(color: Colors.black54),
-          ),
-          const SizedBox(height: 16),
-          Material(
-            color: Colors.transparent,
-            child: Row(
-              children: [
-                Expanded(
-                  child: RadioListTile<ArtStyleMode>(
-                    title: const Text('Cute'),
-                    value: ArtStyleMode.cute,
-                    groupValue: state.artStyleMode,
-                    onChanged: (ArtStyleMode? value) {
-                      if (value != null) {
-                        ref
-                            .read(settingsProvider.notifier)
-                            .setArtStyleMode(value);
-                      }
-                    },
-                  ),
-                ),
-                Expanded(
-                  child: RadioListTile<ArtStyleMode>(
-                    title: const Text('Detailed'),
-                    value: ArtStyleMode.detailed,
-                    groupValue: state.artStyleMode,
-                    onChanged: (ArtStyleMode? value) {
-                      if (value != null) {
-                        ref
-                            .read(settingsProvider.notifier)
-                            .setArtStyleMode(value);
-                      }
-                    },
-                  ),
-                ),
-                Expanded(
-                  child: RadioListTile<ArtStyleMode>(
-                    title: const Text('Illustration'),
-                    value: ArtStyleMode.illustration,
-                    groupValue: state.artStyleMode,
-                    onChanged: (ArtStyleMode? value) {
-                      if (value != null) {
-                        ref
-                            .read(settingsProvider.notifier)
-                            .setArtStyleMode(value);
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-        ),
-      ),
-    );
-  }
 
-  Widget _buildResponseFormatSelector(SettingsState state) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'AI Response Format',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Choose how Vinci arranges objects on the canvas.',
-            style: TextStyle(color: Colors.black54),
-          ),
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            value: state.responseFormat,
-            decoration: InputDecoration(
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            ),
-            items: const [
-              DropdownMenuItem(value: 'Default', child: Text('Default (Smart Layout)')),
-              DropdownMenuItem(value: 'Formatted', child: Text('Formatted (Grid/Structured)')),
-              DropdownMenuItem(value: 'Random', child: Text('Random (Scattered)')),
-            ],
-            onChanged: (String? newValue) {
-              if (newValue != null) {
-                ref.read(settingsProvider.notifier).setResponseFormat(newValue);
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildProviderCard(AiProvider provider, SettingsState state) {
     final isSelected = state.selectedProvider == provider;

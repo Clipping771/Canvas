@@ -2,14 +2,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/ai_provider.dart';
 
-enum ArtStyleMode { cute, detailed, illustration }
+enum AiResponseFormat { auto, conversational, diagram, code }
 
 class SettingsState {
   final Map<AiProvider, String> apiKeys;
   final AiProvider selectedProvider;
   final String selectedModel;
   final String selectedFont;
-  final ArtStyleMode artStyleMode;
   final String responseFormat;
   final bool enableKeyboardShortcuts;
 
@@ -18,7 +17,6 @@ class SettingsState {
     this.selectedProvider = AiProvider.gemini,
     this.selectedModel = 'gemini-2.5-pro',
     this.selectedFont = 'Inter',
-    this.artStyleMode = ArtStyleMode.detailed,
     this.responseFormat = 'Default',
     this.enableKeyboardShortcuts = true,
   });
@@ -28,7 +26,6 @@ class SettingsState {
     AiProvider? selectedProvider,
     String? selectedModel,
     String? selectedFont,
-    ArtStyleMode? artStyleMode,
     String? responseFormat,
     bool? enableKeyboardShortcuts,
   }) {
@@ -37,7 +34,6 @@ class SettingsState {
       selectedProvider: selectedProvider ?? this.selectedProvider,
       selectedModel: selectedModel ?? this.selectedModel,
       selectedFont: selectedFont ?? this.selectedFont,
-      artStyleMode: artStyleMode ?? this.artStyleMode,
       responseFormat: responseFormat ?? this.responseFormat,
       enableKeyboardShortcuts: enableKeyboardShortcuts ?? this.enableKeyboardShortcuts,
     );
@@ -73,12 +69,6 @@ class SettingsNotifier extends Notifier<SettingsState> {
 
     final savedModel = _prefs.getString('selected_model') ?? 'gemini-2.5-pro';
     final savedFont = _prefs.getString('selected_font') ?? 'Inter';
-    final savedArtStyle = _prefs.getString('art_style_mode') ?? 'cute';
-    final artStyleMode = savedArtStyle == 'detailed'
-        ? ArtStyleMode.detailed
-        : savedArtStyle == 'illustration'
-            ? ArtStyleMode.illustration
-            : ArtStyleMode.cute;
     final savedResponseFormat = _prefs.getString('response_format') ?? 'Default';
     final savedShortcuts = _prefs.getBool('enable_shortcuts') ?? true;
 
@@ -87,7 +77,6 @@ class SettingsNotifier extends Notifier<SettingsState> {
       selectedProvider: savedProvider,
       selectedModel: savedModel,
       selectedFont: savedFont,
-      artStyleMode: artStyleMode,
       responseFormat: savedResponseFormat,
       enableKeyboardShortcuts: savedShortcuts,
     );
@@ -119,11 +108,6 @@ class SettingsNotifier extends Notifier<SettingsState> {
   Future<void> setFont(String fontName) async {
     await _prefs.setString('selected_font', fontName);
     state = state.copyWith(selectedFont: fontName);
-  }
-
-  Future<void> setArtStyleMode(ArtStyleMode mode) async {
-    await _prefs.setString('art_style_mode', mode.name);
-    state = state.copyWith(artStyleMode: mode);
   }
 
   Future<void> setResponseFormat(String format) async {

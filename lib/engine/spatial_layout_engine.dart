@@ -38,6 +38,8 @@ class SpatialLayoutEngine {
           final overlap = candidateRect.intersect(constraint.bounds);
           final overlapArea = overlap.width * overlap.height;
           collisionCost += overlapArea * constraint.decayFactor;
+          // Apply a strict penalty for any overlap
+          collisionCost += 1000000.0;
         }
       }
       
@@ -48,16 +50,12 @@ class SpatialLayoutEngine {
         distanceCost = dist;
       }
       
-      // 3. Viewport Cost
+      // 3. Viewport Cost - Reduced heavily because the camera auto-pans!
+      // We WANT it to go off-screen below if it needs to, like a chat thread.
       double viewportCost = 0.0;
-      if (!viewportBounds.contains(candidateRect.center)) {
-        viewportCost = 10000.0; // High penalty for center being outside viewport
-      }
-      // Also penalty for clipping
       if (candidateRect.left < viewportBounds.left) viewportCost += viewportBounds.left - candidateRect.left;
       if (candidateRect.right > viewportBounds.right) viewportCost += candidateRect.right - viewportBounds.right;
-      if (candidateRect.top < viewportBounds.top) viewportCost += viewportBounds.top - candidateRect.top;
-      if (candidateRect.bottom > viewportBounds.bottom) viewportCost += candidateRect.bottom - viewportBounds.bottom;
+      // Do not penalize bottom clipping, to allow infinite vertical scrolling
       
       // 4. Inertia Cost
       double inertiaCost = 0.0;
@@ -71,11 +69,18 @@ class SpatialLayoutEngine {
       viewportCost = viewportCost / 100.0;
       inertiaCost = inertiaCost / 100.0;
       
+      // Force vertical layout preference by explicitly penalizing horizontal deviation from parent left
+      double alignmentPenalty = 0.0;
+      if (parentBounds != null) {
+        alignmentPenalty = (candidateRect.left - parentBounds.left).abs();
+      }
+      
       double totalCost = 
         (collisionCost * weights.collisionWeight) +
         (distanceCost * weights.distanceWeight) +
         (viewportCost * weights.viewportWeight) +
-        (inertiaCost * weights.inertiaWeight);
+        (inertiaCost * weights.inertiaWeight) +
+        (alignmentPenalty * 10.0); // Strict left-alignment
         
       if (totalCost < lowestCost) {
         lowestCost = totalCost;
@@ -97,14 +102,13 @@ class SpatialLayoutEngine {
       ];
     }
     
-    // Branching: below, right, left, above (with some padding)
-    const double pad = 40.0;
-    return [
-      Offset(parentBounds.left, parentBounds.bottom + pad), // Below
-      Offset(parentBounds.right + pad, parentBounds.top), // Right
-      Offset(parentBounds.left - size.width - pad, parentBounds.top), // Left
-      Offset(parentBounds.left, parentBounds.top - size.height - pad), // Above
-      Offset(parentBounds.right + pad, parentBounds.bottom + pad), // Bottom-Right diagonal
-    ];
+    // Strict Vertical Layout (Top to Bottom) for chat-like behavior
+    final List<Offset> candidates = [];
+    for (double pad in [80.0, 120.0, 180.0, 250.0, 500.0, 1000.0]) {
+      candidates.add(Offset(parentBounds.left, parentBounds.bottom + pad)); // Below
+      // Fallbacks just in case vertical is completely blocked
+      candidates.add(Offset(parentBounds.right + pad, parentBounds.top)); // Right
+    }
+    return candidates;
   }
 }

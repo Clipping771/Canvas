@@ -10,6 +10,8 @@ import 'package:pasteboard/pasteboard.dart';
 import '../models/easter_egg_mode.dart';
 import '../models/canvas_environment.dart';
 import '../engine/canvas_widget.dart';
+import '../engine/spatial_layout_engine.dart';
+import '../engine/cognitive/cognitive_runtime.dart';
 import '../engine/particle_engine.dart';
 import '../providers/drawing_provider.dart';
 import '../providers/notebook_provider.dart';
@@ -41,17 +43,11 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
   late String _currentPageId = widget.pageId;
   bool _isChatOpen = false;
   bool _showToolbox = true;
-  String _insertionPosition = 'Bottom';
   final GlobalKey<CanvasWidgetState> _canvasKey = GlobalKey<CanvasWidgetState>();
+  final FocusNode _canvasFocusNode = FocusNode();
 
   AnimationController? _cameraController;
   Animation<Matrix4>? _cameraAnimation;
-
-  @override
-  void dispose() {
-    _cameraController?.dispose();
-    super.dispose();
-  }
 
   void _focusOnTarget(Offset targetCenter) {
     if (_canvasKey.currentState == null) return;
@@ -62,7 +58,9 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     
     final targetScale = currentMatrix.getMaxScaleOnAxis(); 
     
-    final availableWidth = size.width; 
+    final chatPanelWidth = _isChatOpen ? 400.0 : 0.0;
+    final availableWidth = size.width - chatPanelWidth; 
+    
     final targetX = (availableWidth / 2) - (targetCenter.dx * targetScale);
     final targetY = (size.height / 2) - (targetCenter.dy * targetScale);
 
@@ -105,18 +103,28 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     });
     EventBus().subscribe(EventType.aiActionDispatched, _handleQuizEvent);
     EventBus().subscribe(EventType.aiTaskCompleted, _handleAiTaskCompleted);
+    
+    // Initialize OS layers
+    CognitiveRuntime().initialize();
+  }
+  
+  @override
+  void dispose() {
+    CognitiveRuntime().shutdown();
+    _cameraController?.dispose();
+    _canvasFocusNode.dispose();
+    super.dispose();
   }
 
   void _handleAiTaskCompleted(CanvasEvent event) {
     if (_canvasKey.currentState == null) return;
+    
     final intent = event.payload['intent'] as CameraIntent?;
     if (intent == CameraIntent.noAction) return;
     
-    // We get the target from drawingNotifier's lastAddedBounds
     final bounds = ref.read(drawingProvider).lastAddedBounds;
     if (bounds == null) return;
     
-    // Small delay to let rendering finish
     Future.delayed(const Duration(milliseconds: 300), () {
        if (mounted) _focusOnTarget(bounds.center);
     });
@@ -148,6 +156,12 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(drawingProvider, (previous, next) {
+      if (previous?.strokes != next.strokes) {
+        CognitiveRuntime().spatialMemory.rebuild(next.strokes);
+      }
+    });
+
     final notebooks = ref.watch(notebookProvider);
     final notebook = notebooks.firstWhere((n) => n.id == widget.notebookId);
     final pageIndex = notebook.pages.indexWhere((p) => p.id == _currentPageId);
@@ -237,8 +251,6 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                   context: context,
                   builder: (_) => const AchievementsDialog(),
                 );
-              } else if (value == 'change_layout') {
-                _showLayoutDialog();
               } else if (value == 'change_animation') {
                 _showAnimationDialog();
               } else if (value == 'rename') {
@@ -292,25 +304,6 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                 child: const Text('Show Toolbox'),
               ),
               const PopupMenuDivider(),
-              PopupMenuItem<String>(
-                value: 'change_layout',
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(CupertinoIcons.arrow_up_down_square, size: 20, color: Colors.black54),
-                        SizedBox(width: 12),
-                        Text('Insert Layout', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500)),
-                      ],
-                    ),
-                    Text(
-                      _insertionPosition,
-                      style: const TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ),
               PopupMenuItem<String>(
                 value: 'change_animation',
                 child: Row(
@@ -414,8 +407,10 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
         ],
       ),
       body: Focus(
+        focusNode: _canvasFocusNode,
         autofocus: true,
         onKeyEvent: (node, event) {
+          if (!_canvasFocusNode.hasPrimaryFocus) return KeyEventResult.ignored;
           if (!ref.read(settingsProvider).enableKeyboardShortcuts) return KeyEventResult.ignored;
           if (event is KeyDownEvent) {
             final isCtrl = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlLeft) ||
@@ -490,9 +485,14 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                       ? Colors.blue.withOpacity(0.05)
                       : Colors.transparent),
           ),
-
-          CanvasWidget(key: _canvasKey),
-
+          Listener(
+            onPointerDown: (_) {
+              if (!_canvasFocusNode.hasPrimaryFocus) {
+                _canvasFocusNode.requestFocus();
+              }
+            },
+            child: CanvasWidget(key: _canvasKey),
+          ),
           // Environment Foreground (Frost)
           IgnorePointer(
             child: AnimatedOpacity(
@@ -588,14 +588,8 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                 onDrawEnd: (newMaxY) {
                   setState(() => _isChatOpen = true);
                 },
-                onCameraFocusRequired: (target) {
-                  setState(() => _isChatOpen = false);
-                  _focusOnTarget(target);
-                },
                 onClose: _toggleChat,
-                getTransform: () =>
-                    _canvasKey.currentState?.transformationController.value,
-                insertionPosition: _insertionPosition,
+                getTransform: () => _canvasKey.currentState?.transformationController.value,
               ),
             ),
           ),
@@ -925,45 +919,6 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     );
   }
 
-  void _showLayoutDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('Insert Layout Position'),
-          children: ['Top', 'Bottom', 'Left', 'Right', 'Diagonal', 'Center']
-              .map((value) => SimpleDialogOption(
-                    onPressed: () {
-                      setState(() {
-                        _insertionPosition = value;
-                      });
-                      Navigator.pop(context);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _insertionPosition == value
-                                ? Icons.radio_button_checked
-                                : Icons.radio_button_unchecked,
-                            color: _insertionPosition == value
-                                ? Theme.of(context).colorScheme.primary
-                                : Colors.grey,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(value, style: const TextStyle(fontSize: 16)),
-                        ],
-                      ),
-                    ),
-                  ))
-              .toList(),
-        );
-      },
-    );
-  }
-
   void _showAnimationDialog() {
     showDialog(
       context: context,
@@ -1030,58 +985,27 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     final strokes = ref.read(drawingProvider).strokes;
     Offset targetPos = _getViewportCenter();
 
-    if (strokes.isNotEmpty) {
-      double maxY = double.negativeInfinity;
-      double minY = double.infinity;
-      double minX = double.infinity;
-      double maxX = double.negativeInfinity;
+    final transform = _canvasKey.currentState?.transformationController.value ?? Matrix4.identity();
+    final inverse = Matrix4.copy(transform)..invert();
+    final size = MediaQuery.of(context).size;
+    final viewportRect = Rect.fromPoints(
+      MatrixUtils.transformPoint(inverse, const Offset(0, 0)),
+      MatrixUtils.transformPoint(inverse, Offset(size.width, size.height)),
+    );
 
-      for (var stroke in strokes) {
-        for (var p in stroke.points) {
-          double pMaxY = p.dy;
-          if (stroke.decodedImage != null) {
-            pMaxY += stroke.decodedImage!.height;
-          } else if (stroke.text != null)
-            pMaxY += (stroke.text!.split('\n').length) * stroke.size * 2.5;
-          if (pMaxY > maxY) maxY = pMaxY;
-          if (p.dy < minY) minY = p.dy;
-          if (p.dx < minX) minX = p.dx;
-          if (p.dx > maxX) maxX = p.dx;
+    double maxY = double.negativeInfinity;
+    
+    for (var stroke in strokes) {
+      if (stroke.bounds.overlaps(viewportRect)) {
+        if (stroke.bounds.bottom > maxY) {
+          maxY = stroke.bounds.bottom;
         }
       }
+    }
 
-      if (maxY != double.negativeInfinity) {
-        double centerX = minX != double.infinity
-            ? (minX + maxX) / 2
-            : targetPos.dx;
-        double centerY = minY != double.infinity
-            ? (minY + maxY) / 2
-            : targetPos.dy;
-
-        switch (_insertionPosition) {
-          case 'Bottom':
-            targetPos = Offset(centerX, maxY + 50);
-            break;
-          case 'Top':
-            targetPos = Offset(
-              centerX,
-              minY - 300,
-            ); // Approximate height, ideally subtract image height
-            break;
-          case 'Left':
-            targetPos = Offset(minX - 400, centerY); // Approximate width
-            break;
-          case 'Right':
-            targetPos = Offset(maxX + 50, centerY);
-            break;
-          case 'Diagonal':
-            targetPos = Offset(maxX + 50, maxY + 50);
-            break;
-          case 'Center':
-            // Keeps targetPos at Viewport Center
-            break;
-        }
-      }
+    if (maxY != double.negativeInfinity) {
+      // Place it safely below the lowest item in the current view
+      targetPos = Offset(targetPos.dx, maxY + 50);
     }
 
     ref.read(drawingProvider.notifier).insertImage(bytes, targetPos);

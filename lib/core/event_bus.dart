@@ -8,6 +8,7 @@ enum EventType {
   aiActionDispatched,
   environmentChanged,
   systemError,
+  cancelGeneration,
 }
 
 class CanvasEvent {

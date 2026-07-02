@@ -1246,6 +1246,46 @@ class DrawingNotifier extends Notifier<DrawingState> {
           continue;
         }
 
+        if (stroke.imageBytes != null) {
+          state = state.copyWith(
+            strokes: [
+              ...state.strokes,
+              Stroke(
+                points: stroke.points,
+                color: stroke.color,
+                size: 0.1,
+                toolType: stroke.toolType,
+                imageBytes: stroke.imageBytes,
+                decodedImage: stroke.decodedImage,
+              ),
+            ],
+            undoHistory: newUndoHistory,
+            redoHistory: [],
+          );
+          
+          final int frames = 30; // 500ms at 60fps
+          for (int f = 1; f <= frames; f++) {
+            await Future.delayed(const Duration(milliseconds: 16));
+            final double progress = f / frames;
+            // Ease out cubic
+            final double eased = 1 - math.pow(1 - progress, 3).toDouble();
+            
+            _currentStroke = Stroke(
+              points: stroke.points,
+              color: stroke.color,
+              size: 0.1 + (stroke.size - 0.1) * eased,
+              toolType: stroke.toolType,
+              imageBytes: stroke.imageBytes,
+              decodedImage: stroke.decodedImage,
+            );
+            
+            final updatedStrokes = List<Stroke>.from(state.strokes);
+            updatedStrokes.last = _currentStroke!;
+            state = state.copyWith(strokes: updatedStrokes);
+          }
+          continue;
+        }
+
         _currentStroke = Stroke(
           points: [stroke.points.first],
           color: stroke.color,

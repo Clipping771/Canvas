@@ -4,10 +4,13 @@ import '../providers/drawing_provider.dart';
 import '../models/tool_type.dart';
 import 'drawing_painter.dart';
 import 'dart:convert';
+import '../core/event_bus.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'selection_overlay.dart';
 import '../widgets/weather_widget.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../engine/cognitive/cognitive_runtime.dart';
+import '../widgets/ai_avatar_widget.dart';
 
 class CanvasWidget extends ConsumerStatefulWidget {
   const CanvasWidget({super.key});
@@ -45,7 +48,7 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
 
     return InteractiveViewer(
       transformationController: transformationController,
-      panEnabled: true,
+      panEnabled: drawingState.currentTool == ToolType.pan,
       scaleEnabled: true,
       minScale: 0.00001, // Practically infinite zoom out
       maxScale: 10000.0, // Practically infinite zoom in
@@ -249,6 +252,7 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
                   notifier.clearSelection();
                 },
               ),
+            AiAvatarWidget(engine: CognitiveRuntime().avatarEngine),
             if (drawingState.aiStatus != null && drawingState.aiStatusTarget != null)
               Positioned(
                 left: drawingState.aiStatusTarget!.dx,
@@ -272,18 +276,50 @@ class AiStatusOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        AnimatedShimmerText(
-          text: status,
-          textColor: textColor,
-          style: GoogleFonts.nanumPenScript(
-            textStyle: const TextStyle(fontSize: 28),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: textColor == Colors.black ? Colors.white : Colors.black87,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-        ),
-        AnimatedDots(textColor: textColor),
-      ],
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedShimmerText(
+            text: status,
+            textColor: textColor,
+            style: GoogleFonts.nanumPenScript(
+              textStyle: const TextStyle(fontSize: 28),
+            ),
+          ),
+          AnimatedDots(textColor: textColor),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () {
+              EventBus().publish(EventType.cancelGeneration);
+            },
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.stop,
+                color: Colors.white,
+                size: 16,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

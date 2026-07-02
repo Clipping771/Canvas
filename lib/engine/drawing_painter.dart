@@ -81,7 +81,11 @@ class DrawingCanvasPainter extends CustomPainter {
         final hasBengali = stroke.text!.codeUnits.any(
           (c) => c >= 0x0980 && c <= 0x09FF,
         );
-        final baseStyle = TextStyle(color: stroke.color, fontSize: stroke.size);
+        final baseStyle = TextStyle(
+          color: stroke.color, 
+          fontSize: stroke.size,
+          height: 1.5, // Expands line height to prevent clipping tall handwriting ascenders
+        );
 
         final textStyle = hasBengali
             ? GoogleFonts.galada(textStyle: baseStyle)

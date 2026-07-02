@@ -50,6 +50,11 @@ class Stroke {
   Rect get bounds {
     if (points.isEmpty) return Rect.zero;
 
+    if (toolType == ToolType.widget) {
+      // Hardcoded approximate bounds for widgets like weather to prevent overlaps
+      return Rect.fromLTWH(points.first.dx, points.first.dy, 400, 250);
+    }
+
     double minX = double.infinity, minY = double.infinity;
     double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
 
@@ -83,12 +88,20 @@ class Stroke {
       }
       return Rect.fromLTRB(minX, minY, maxX, maxY);
     } else if (text != null) {
+      int totalEstimatedLines = 0;
+      double estimatedMaxWidth = 0.0;
       final lines = text!.split('\n');
-      final maxLineLength = lines
-          .map((l) => l.length)
-          .reduce((a, b) => a > b ? a : b);
-      final width = size * maxLineLength * 0.7;
-      final height = size * 1.5 * lines.length;
+      final wrapWidthChars = 50.0; // TextPainter wraps at stroke.size * 30.0, which is roughly 50-60 characters
+      for (var l in lines) {
+         int wrapCount = (l.length / wrapWidthChars).ceil();
+         if (wrapCount == 0) wrapCount = 1;
+         totalEstimatedLines += wrapCount;
+         
+         double lineWidth = l.length > wrapWidthChars ? wrapWidthChars * size * 0.6 : l.length * size * 0.6;
+         if (lineWidth > estimatedMaxWidth) estimatedMaxWidth = lineWidth;
+      }
+      final width = estimatedMaxWidth;
+      final height = size * 1.5 * totalEstimatedLines;
 
       if (rotation == 0.0) {
         return Rect.fromLTWH(points.first.dx, points.first.dy, width, height);

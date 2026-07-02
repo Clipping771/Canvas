@@ -223,7 +223,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         final targetYScaled = (targetY * pixelRatio).toInt();
 
         inkBoundsStr =
-            "\n\n[System Note: If you are answering a general question or creating a new conversational response, YOU MUST place it exactly at coordinates X=${targetTopLeft.dx.toInt()}, Y=${targetTopLeft.dy.toInt()}. This is the layout engine's designated spot for your new response. HOWEVER, if the user asks you to modify, paint, fill, circle, or interact with an existing object (like a bottle, drawing, etc), YOU MUST use that object's exact original coordinates from the canvas to place your drawing precisely over or inside it. DO NOT assume (0,0) for anything.]";
+            "\n\n[System Note: If you are answering a general question or creating a new conversational response, YOU MUST place it exactly at coordinates X=$targetXScaled, Y=$targetYScaled. This is the layout engine's designated spot for your new response. HOWEVER, if the user asks you to modify, paint, fill, circle, or interact with an existing object (like a bottle, drawing, etc), YOU MUST use that object's exact original coordinates from the canvas to place your drawing precisely over or inside it. DO NOT assume (0,0) for anything.]";
       } else {
         final targetX = screenSize.width / 2.0;
         final targetY = screenSize.height / 2.0;
@@ -232,10 +232,13 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             Offset(targetX, targetY));
         
         targetTopLeft = canvasTargetCenter;
-            
+             
         drawingNotifier.setAiStatus('Thinking', target: canvasTargetCenter);
         
-        inkBoundsStr = "\n\n[System Note: The canvas is currently empty. Place your response exactly at coordinates X=${targetTopLeft!.dx.toInt()}, Y=${targetTopLeft!.dy.toInt()}.]";
+        final targetXScaled = (targetX * pixelRatio).toInt();
+        final targetYScaled = (targetY * pixelRatio).toInt();
+        
+        inkBoundsStr = "\n\n[System Note: The canvas is currently empty. Place your response exactly at coordinates X=$targetXScaled, Y=$targetYScaled.]";
       }
 
       final scaledWidth = (screenSize.width * pixelRatio).toInt();

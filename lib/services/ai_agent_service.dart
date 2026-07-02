@@ -182,6 +182,7 @@ Supported actions for the "ops" array:
 19. {"action": "apply_gravity", "targetGroupId": "car"} (CRITICAL: If there are multiple objects on the canvas and the user says "add gravity" without specifying which one, you MUST set decision to "ask_clarification" and ask the user which object to apply it to!)
 20. {"action": "insert_uml", "plantuml": "@startuml\n...\n@enduml", "position": [x, y]} (Use ONLY valid PlantUML syntax!)
 21. {"action": "focus_area", "rect": [x, y, w, h]} (CRITICAL: Use this when the user asks you to 'focus' or 'zoom in' or 'look at' a specific object or area of the canvas. Estimate the bounds of the target using the CANVAS SCENE GRAPH data provided!)
+22. {"action": "insert_chemistry", "formula": "H2SO4", "position": [x, y]} (CRITICAL: Use this when the user asks for ANY chemical structure, diagram, or formula like water, benzene, H2SO4, etc. Do NOT try to draw it manually using SVG or shapes!)
 
 CRITICAL UML AND CHARTS RULE: If the user asks for a CHART, GRAPH, WIREFRAME, or MINDMAP, use the `insert_uml` action with valid PlantUML code.
 - Do NOT use `@startsalt` for tables! It looks like a terrible 1990s wireframe and the user hates it!

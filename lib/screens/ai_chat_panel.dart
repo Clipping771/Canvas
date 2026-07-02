@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'dart:ui';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -1409,6 +1410,41 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               (size * scale) * 3.0,
             ),
           );
+        } else if (type == 'insert_chemistry') {
+          final formula = action['formula'] as String?;
+          List? pos = action['position'] as List?;
+          if (formula != null && pos != null && pos.length >= 2) {
+            double rawX = pos[0].toDouble();
+            double rawY = pos[1].toDouble();
+            final p = mapPoint(rawX, rawY);
+            
+            final url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${Uri.encodeComponent(formula)}/PNG';
+            
+            try {
+              final response = await http.get(Uri.parse(url));
+              if (response.statusCode == 200) {
+                final imageBytes = response.bodyBytes;
+                final codec = await instantiateImageCodec(imageBytes);
+                final frameInfo = await codec.getNextFrame();
+                final decodedImage = frameInfo.image;
+                
+                newStrokes.add(
+                  Stroke(
+                    points: [Offset(p.dx, p.dy)],
+                    color: color,
+                    size: 2.0,
+                    toolType: ToolType.pen,
+                    imageBytes: imageBytes,
+                    decodedImage: decodedImage,
+                  ),
+                );
+              } else {
+                print("WARNING: PubChem API failed with status \${response.statusCode}");
+              }
+            } catch (e) {
+              print("WARNING: Failed to fetch chemistry image: \$e");
+            }
+          }
         } else {
           print("WARNING: Unrecognized AI action type: $type");
           if (type != null) unrecognized.add(type.toString());

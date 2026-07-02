@@ -200,18 +200,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           MatrixUtils.transformPoint(inverse, Offset(screenSize.width, screenSize.height))
         );
         
-        // Calculate scene bounds for the layout engine fallback
-        double sceneMinX = double.infinity, sceneMinY = double.infinity;
-        double sceneMaxX = double.negativeInfinity, sceneMaxY = double.negativeInfinity;
-        for (var stroke in strokes) {
-          if (stroke.bounds.left < sceneMinX) sceneMinX = stroke.bounds.left;
-          if (stroke.bounds.top < sceneMinY) sceneMinY = stroke.bounds.top;
-          if (stroke.bounds.right > sceneMaxX) sceneMaxX = stroke.bounds.right;
-          if (stroke.bounds.bottom > sceneMaxY) sceneMaxY = stroke.bounds.bottom;
-        }
-        
-        final parentBounds = parentId != null ? spatialRegistry.getParentBounds(parentId) : 
-            Rect.fromLTRB(sceneMinX, sceneMinY, sceneMaxX, sceneMaxY); // Use scene coordinates!
+        final parentBounds = parentId != null ? spatialRegistry.getParentBounds(parentId) : null;
             
         final optimalOffset = spatialRegistry.state.layoutEngine.computeOptimalPlacement(
           nodeSize: const Size(400, 400), // Estimated generation size

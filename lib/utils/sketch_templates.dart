@@ -25,6 +25,16 @@ class SketchTemplates {
 
   static String _getSvgString(String name) {
     switch (name.toLowerCase()) {
+      case 'mountain':
+        return "M12 2L1 22h22L12 2z"; // Simple clean mountain peak (fills beautifully)
+      case 'sun':
+        return "M12 6c-3.3 0-6 2.7-6 6s2.7 6 6 6 6-2.7 6-6-2.7-6-6-6zm0-5l1.5 2.5h-3L12 1zm0 22l-1.5-2.5h3L12 23zM1 12l2.5-1.5v3L1 12zm22 0l-2.5 1.5v-3L23 12zM5.2 5.2l2.2.8-1.4 1.4-0.8-2.2zm13.6 13.6l-2.2-.8 1.4-1.4 0.8 2.2zM18.8 5.2l.8 2.2-1.4 1.4-2.2-.8zm-13.6 13.6l-.8-2.2 1.4-1.4 2.2.8z"; // Gorgeous solid sun with 8 clean triangular rays
+      case 'cloud':
+        return "M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z";
+      case 'bird':
+        return "M2 10 Q7 5, 12 11 Q17 5, 22 10 L22 11 Q17 7, 12 13 Q7 7, 2 11 Z"; // Sleek wings-up flapping bird silhouette
+      case 'river':
+        return "M0 10 C 6 14, 12 6, 18 10 S 30 6, 36 10 L 36 14 L 0 14 Z"; // Wavy filled river segment (0-36 width)
       case 'car':
         return "M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z";
       case 'train':
@@ -37,8 +47,9 @@ class SketchTemplates {
         // A cute cat icon path
         return "M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm-4 4c0-2.21 1.79-4 4-4s4 1.79 4 4-1.79 4-4 4-4-1.79-4-4zm8.5-7.5l-2.12 2.12C13.6 6.22 12.83 6 12 6s-1.6.22-2.38.62L7.5 4.5 6 6l2 2c-.63 1.09-1 2.33-1 3.65 0 3.87 3.13 7 7 7s7-3.13 7-7c0-1.32-.37-2.56-1-3.65l2-2-1.5-1.5z M9 11h2v2H9v-2zm4 0h2v2h-2v-2z"; 
       case 'frog':
+        return "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm0-4h-2v-6h2v6z";
       case 'tree':
-        return "M17 12c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 8c-1.65 0-3-1.35-3-3s1.35-3 3-3 3 1.35 3 3-1.35 3-3 3z M12 6c-2.76 0-5 2.24-5 5 0 .97.28 1.87.75 2.61L4 16.5 5.5 18l3.75-3.75C10.08 14.83 11 15.5 12 15.5c2.76 0 5-2.24 5-5s-2.24-5-5-5zm0 8c-1.65 0-3-1.35-3-3s1.35-3 3-3 3 1.35 3 3-1.35 3-3 3z M7 12c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 8c-1.65 0-3-1.35-3-3s1.35-3 3-3 3 1.35 3 3-1.35 3-3 3z"; // A nice tree/cloud shape
+        return "M12 2 L4 11 h3 L2 16 h4 L0 20 h10 v3 h4 v-3 h10 L18 16 h4 L17 11 h3 Z"; // Leafy pine tree with layered triangular foliage and trunk
       default:
         // Fallback generic star
         return "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z";

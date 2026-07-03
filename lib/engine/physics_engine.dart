@@ -1,5 +1,3 @@
-import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'dart:ui';
 import '../models/stroke.dart';
@@ -17,70 +15,68 @@ class PhysicsState {
   });
 }
 
+/// A self-contained, frame-based physics engine that uses
+/// [SchedulerBinding.scheduleFrameCallback] — no vsync/Ticker needed.
 class PhysicsEngine {
   static final PhysicsEngine _instance = PhysicsEngine._internal();
   factory PhysicsEngine() => _instance;
   
-  Ticker? _ticker;
   final Map<String, PhysicsState> _objectStates = {};
   
-  // Custom lightweight physics properties
-  final double gravity = 9.8;
-  final double friction = 0.98;
-  final double bounceFactor = -0.6;
+  // Physics constants (canvas-coordinate units, ~60fps frames)
+  final double gravityPerFrame = 2.5;   // pixels per frame² downward
+  final double friction = 0.99;
+  final double bounceFactor = 0.55;
   
   Function(List<Stroke> updatedStrokes)? onPhysicsUpdate;
   List<Stroke> _activeStrokes = [];
+  bool _running = false;
+  double _floorY = 1800.0; // default, updated by attachStrokes caller
 
   PhysicsEngine._internal() {
     EventBus().subscribe(EventType.physicsTriggered, _handlePhysicsEvent);
   }
 
   void _handlePhysicsEvent(CanvasEvent event) {
-    // If intent router sends a physics event (e.g. 'apply_gravity')
     final action = event.payload['action'];
     if (action == 'apply_gravity') {
-      _startSimulation();
+      startSimulation();
     }
   }
 
-  void attachStrokes(List<Stroke> strokes) {
+  void attachStrokes(List<Stroke> strokes, {double floorY = 1800.0}) {
     _activeStrokes = strokes;
+    _floorY = floorY;
     for (var stroke in strokes) {
       if (stroke.physicsEnabled && !_objectStates.containsKey(stroke.id)) {
         _objectStates[stroke.id] = PhysicsState(
-          acceleration: Offset(0, gravity),
+          velocity: Offset.zero,
+          acceleration: Offset(0, gravityPerFrame),
         );
       }
     }
   }
 
-  Duration _lastTickTime = Duration.zero;
-
-  void _startSimulation() {
-    if (_ticker == null || !_ticker!.isActive) {
-      _lastTickTime = Duration.zero;
-      _ticker = Ticker(_tick)..start();
-    }
+  void startSimulation() {
+    if (_running) return;
+    _running = true;
+    SchedulerBinding.instance.scheduleFrameCallback(_tick);
   }
 
   void stopSimulation() {
-    _ticker?.stop();
+    _running = false;
+    _objectStates.clear();
   }
 
-  void _tick(Duration elapsed) {
-    if (_activeStrokes.isEmpty || onPhysicsUpdate == null) return;
-    
-    if (elapsed.inMilliseconds - _lastTickTime.inMilliseconds < 33) {
-      return; // Throttle to ~30 FPS
+  void _tick(Duration timestamp) {
+    if (!_running) return;
+    if (_activeStrokes.isEmpty || onPhysicsUpdate == null) {
+      _running = false;
+      return;
     }
-    _lastTickTime = elapsed;
 
     bool hasMoved = false;
     final List<Stroke> updatedStrokes = [];
-
-    // Screen bounds for simple collision (Hardcoded 1080p for now, should be injected)
-    const floorY = 1080.0;
 
     for (var stroke in _activeStrokes) {
       if (!stroke.physicsEnabled) {
@@ -88,54 +84,51 @@ class PhysicsEngine {
         continue;
       }
 
-      final state = _objectStates[stroke.id];
-      if (state == null) continue;
+      final pState = _objectStates[stroke.id];
+      if (pState == null) {
+        updatedStrokes.add(stroke);
+        continue;
+      }
 
-      // Update velocity
-      state.velocity += state.acceleration;
-      state.velocity = Offset(
-        state.velocity.dx * friction,
-        state.velocity.dy * friction,
+      // Apply gravity
+      pState.velocity += pState.acceleration;
+      pState.velocity = Offset(
+        pState.velocity.dx * friction,
+        pState.velocity.dy, // gravity is lossless vertically
       );
 
-      // Stop jitter
-      if (state.velocity.distance < 0.1 && state.acceleration.dy == 0) {
+      // Stop when nearly motionless
+      if (pState.velocity.distance < 0.3 && pState.acceleration == Offset.zero) {
         updatedStrokes.add(stroke);
         continue;
       }
 
       hasMoved = true;
-
-      // Translate points
-      final newPoints = stroke.points.map((p) => p + state.velocity).toList();
+      final newPoints = stroke.points.map((p) => p + pState.velocity).toList();
       
-      // Simple floor collision bounds check
-      double maxY = 0;
-      for (var p in newPoints) {
-        if (p.dy > maxY) maxY = p.dy;
-      }
-
-      if (maxY > floorY) {
-        // Bounce
-        state.velocity = Offset(state.velocity.dx, state.velocity.dy * bounceFactor);
-        
-        // Correct position to floor
-        final diff = floorY - maxY;
-        for (int i = 0; i < newPoints.length; i++) {
-          newPoints[i] = Offset(newPoints[i].dx, newPoints[i].dy + diff);
+      // Floor collision
+      double maxY = newPoints.fold(0.0, (m, p) => p.dy > m ? p.dy : m);
+      if (maxY >= _floorY) {
+        final overshoot = maxY - _floorY;
+        final correctedPoints = newPoints.map((p) => Offset(p.dx, p.dy - overshoot)).toList();
+        pState.velocity = Offset(
+          pState.velocity.dx * 0.6,
+          -pState.velocity.dy.abs() * bounceFactor,
+        );
+        if (pState.velocity.dy.abs() < 1.0) {
+          pState.velocity = Offset(pState.velocity.dx * 0.5, 0);
+          pState.acceleration = Offset.zero; // resting
         }
-        
-        if (state.velocity.dy.abs() < 1.0) {
-          state.velocity = Offset(state.velocity.dx, 0);
-          state.acceleration = Offset.zero; // Rest
-        }
+        updatedStrokes.add(stroke.copyWith(points: correctedPoints));
+      } else {
+        updatedStrokes.add(stroke.copyWith(points: newPoints));
       }
-
-      updatedStrokes.add(stroke.copyWith(points: newPoints));
     }
 
     if (hasMoved) {
       onPhysicsUpdate!(updatedStrokes);
+      // Schedule next frame
+      SchedulerBinding.instance.scheduleFrameCallback(_tick);
     } else {
       stopSimulation();
     }

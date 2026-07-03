@@ -27,6 +27,7 @@ class Stroke {
   final bool physicsEnabled; // Flags if this object interacts with physics engine
   final Map<String, dynamic>? customMetadata; // Open-ended state/sync tracking
   final int version; // Event versioning for conflict resolution
+  final double? animationProgress; // Tracking animation reveal of the stroke (e.g. 0.0 to 1.0)
 
   Stroke({
     String? id,
@@ -45,6 +46,7 @@ class Stroke {
     this.physicsEnabled = false,
     this.customMetadata,
     this.version = 1,
+    this.animationProgress,
   }) : id = id ?? _uuid.v4();
 
   Rect get bounds {
@@ -158,6 +160,9 @@ class Stroke {
           _cachedPath!.lineTo(points[i].dx, points[i].dy);
         }
       }
+      if (isFilled) {
+        _cachedPath!.close();
+      }
     }
     return _cachedPath!;
   }
@@ -179,6 +184,7 @@ class Stroke {
     bool? physicsEnabled,
     Map<String, dynamic>? customMetadata,
     int? version,
+    double? animationProgress,
     bool clearGroupId = false,
     bool clearName = false,
   }) {
@@ -199,6 +205,7 @@ class Stroke {
       physicsEnabled: physicsEnabled ?? this.physicsEnabled,
       customMetadata: customMetadata ?? this.customMetadata,
       version: version ?? this.version,
+      animationProgress: animationProgress ?? this.animationProgress,
     );
   }
 

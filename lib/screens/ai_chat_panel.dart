@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:ui';
@@ -397,6 +398,15 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         ),
         _cancelCompleter!.future,
       ]);
+
+      try {
+        File('c:/My World/gravity/notesketch_pro/ai_response_debug.log').writeAsStringSync(
+          '=== NEW RESPONSE ===\n$response\n\n',
+          mode: FileMode.append,
+        );
+      } catch (e) {
+        print("Failed to write debug log: $e");
+      }
 
       if (response == "Cancelled by user" || _cancelRequested) {
         throw Exception("Cancelled by user");
@@ -947,6 +957,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             size = (double.tryParse(rawSize) ?? 16.0) / 2.0;
           }
         } catch (_) {}
+        final shapeFilled = (action['isFilled'] ?? action['filled']) as bool? ?? false;
         if (type == 'draw_rect') {
           final rectData = action['rect'] as List?;
           if (rectData == null || rectData.length < 4) continue;
@@ -963,6 +974,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               p2.dy - p1.dy,
               color,
               size,
+              isFilled: shapeFilled,
             ),
           );
         } else if (type == 'draw_circle') {
@@ -972,7 +984,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           final scale = inverse.getMaxScaleOnAxis();
           final radius = ((action['radius'] as num).toDouble() / 2.0) * scale;
           newStrokes.add(
-            AiStrokeGenerator.generateCircle(p.dx, p.dy, radius, color, size),
+            AiStrokeGenerator.generateCircle(p.dx, p.dy, radius, color, size, isFilled: shapeFilled),
           );
         } else if (type == 'draw_polygon') {
           final pointsData = action['points'] as List?;
@@ -984,7 +996,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             );
           }).toList();
           newStrokes.add(
-            AiStrokeGenerator.generatePolygon(mappedPoints, color, size),
+            AiStrokeGenerator.generatePolygon(mappedPoints, color, size, isFilled: shapeFilled),
           );
         } else if (type == 'draw_line') {
           final start = action['start'] as List?;
@@ -1155,7 +1167,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             final scale = inverse.getMaxScaleOnAxis();
 
             final svgScale = (action['scale'] as num?)?.toDouble() ?? 1.0;
-            final isFilled = action['isFilled'] as bool? ?? false;
+            final isFilled = (action['isFilled'] ?? action['filled']) as bool? ?? false;
 
             try {
               final parsedPath = parseSvgPathData(pathData);
@@ -1219,7 +1231,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             }
           }
 
-          // Collision avoidance via radial search
+          // Collision avoidance via radial search (bypassed if overlap is requested)
+          final overlap = action['overlap'] == true || action['allowOverlap'] == true;
           final currentStrokes = ref.read(drawingProvider).strokes;
           final List<Rect> existingBounds = [];
           for (var s in currentStrokes) {
@@ -1237,7 +1250,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           double finalY = p.dy;
           double radius = 0;
           double angle = 0;
-          bool hasCollision = true;
+          bool hasCollision = !overlap;
 
           double shapeSize = (size * scale) * 3.0;
 
@@ -1266,15 +1279,14 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             iterations++;
           }
 
-          // Always use a default static style since ArtStyleMode is removed
           final path = SketchTemplates.getPath(
             textName,
             finalX,
             finalY,
-            100.0, // Default base size 100
+            size * 2.0, // Pass the actual size parameter instead of hardcoded 100
           );
 
-          final isFilled = action['isFilled'] as bool? ?? false;
+          final isFilled = (action['isFilled'] ?? action['filled']) as bool? ?? true;
           for (var metric in path.computeMetrics()) {
             List<Offset> extractedPoints = [];
             for (double i = 0; i < metric.length; i += 4.0) { // Increased step for performance
@@ -1405,6 +1417,44 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               }
             } catch (e) {
               print("WARNING: Failed to fetch chemistry image: \$e");
+            }
+          }
+        } else if (type == 'generate_image') {
+          final prompt = action['prompt'] as String?;
+          List? pos = action['position'] as List?;
+          if (prompt != null && pos != null && pos.length >= 2) {
+            double rawX = pos[0].toDouble();
+            double rawY = pos[1].toDouble();
+            final p = mapPoint(rawX, rawY);
+            
+            final seed = DateTime.now().millisecondsSinceEpoch;
+            
+            // Using the deployed Vercel proxy to bypass Cloudflare Bot Protection on Web
+            final url = 'https://vinciboard-alpha.vercel.app/api/image?prompt=${Uri.encodeComponent(prompt)}&seed=$seed&width=512&height=512';
+            
+            try {
+              final response = await http.get(Uri.parse(url));
+              if (response.statusCode == 200) {
+                final imageBytes = response.bodyBytes;
+                final codec = await instantiateImageCodec(imageBytes);
+                final frameInfo = await codec.getNextFrame();
+                final decodedImage = frameInfo.image;
+                
+                newStrokes.add(
+                  Stroke(
+                    points: [Offset(p.dx, p.dy)],
+                    color: color,
+                    size: 1.0,
+                    toolType: ToolType.pen,
+                    imageBytes: imageBytes,
+                    decodedImage: decodedImage,
+                  ),
+                );
+              } else {
+                print("WARNING: Pollinations API failed with status ${response.statusCode}");
+              }
+            } catch (e) {
+              print("WARNING: Failed to fetch generated image: $e");
             }
           }
         } else {

@@ -1108,47 +1108,35 @@ class DrawingNotifier extends Notifier<DrawingState> {
           state = state.copyWith(
             strokes: [
               ...state.strokes,
-              Stroke(
-                points: stroke.points,
-                color: stroke.color,
-                size: 0.1,
-                toolType: stroke.toolType,
-                imageBytes: stroke.imageBytes,
-                decodedImage: stroke.decodedImage,
-              ),
+              stroke.copyWith(animationProgress: 0.0),
             ],
             undoHistory: newUndoHistory,
             redoHistory: [],
           );
           
-          final int frames = 30; // 500ms at 60fps
+          final int frames = 90; // 1.5s at 60fps
           for (int f = 1; f <= frames; f++) {
             await Future.delayed(const Duration(milliseconds: 16));
             final double progress = f / frames;
-            // Ease out cubic
-            final double eased = 1 - math.pow(1 - progress, 3).toDouble();
+            // Ease in out quad
+            final double eased = progress < 0.5 ? 2 * progress * progress : 1 - math.pow(-2 * progress + 2, 2).toDouble() / 2;
             
-            _currentStroke = Stroke(
-              points: stroke.points,
-              color: stroke.color,
-              size: 0.1 + (stroke.size - 0.1) * eased,
-              toolType: stroke.toolType,
-              imageBytes: stroke.imageBytes,
-              decodedImage: stroke.decodedImage,
-            );
+            _currentStroke = stroke.copyWith(animationProgress: eased);
             
             final updatedStrokes = List<Stroke>.from(state.strokes);
             updatedStrokes.last = _currentStroke!;
             state = state.copyWith(strokes: updatedStrokes);
           }
+          
+          final finalStrokes = List<Stroke>.from(state.strokes);
+          finalStrokes.last = stroke.copyWith(animationProgress: 1.0);
+          state = state.copyWith(strokes: finalStrokes);
+          
           continue;
         }
 
-        _currentStroke = Stroke(
+        _currentStroke = stroke.copyWith(
           points: [stroke.points.first],
-          color: stroke.color,
-          size: stroke.size,
-          toolType: stroke.toolType,
         );
 
         state = state.copyWith(
@@ -1196,12 +1184,8 @@ class DrawingNotifier extends Notifier<DrawingState> {
               if (!completer.isCompleted) completer.complete();
             }
 
-            _currentStroke = Stroke(
+            _currentStroke = stroke.copyWith(
               points: densePoints.sublist(0, currentIndex),
-              color: stroke.color,
-              size: stroke.size,
-              toolType: stroke.toolType,
-              text: stroke.text,
             );
 
             final updatedStrokes = List<Stroke>.from(state.strokes);
@@ -1211,6 +1195,11 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
           ticker.start();
           await completer.future;
+
+          // Replace final animated stroke with the original complete stroke to preserve all metadata (isFilled, etc)
+          final finalStrokes = List<Stroke>.from(state.strokes);
+          finalStrokes.last = stroke;
+          state = state.copyWith(strokes: finalStrokes);
         }
       }
 

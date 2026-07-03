@@ -191,7 +191,7 @@ Supported actions for the "ops" array:
 10. {"action": "undo", "count": 1}
 12. {"action": "learn_rule", "rule": "Never draw over the image"}
 13. {"action": "insert_widget", "type": "weather", "city": "London", "position": [x, y], "days": 3} (You can set days up to 7 if requested)
-14. {"action": "draw_template", "name": "frog", "position": [x, y], "size": 100, "isFilled": false} (CRITICAL: If the user asks for ANY of these exactly: frog, dog, car, house, tree, train, cat, YOU MUST use this action! DO NOT draw them manually using shapes!)
+14. {"action": "draw_template", "name": "mountain", "position": [x, y], "size": 250, "color": "0xFF8B7355", "isFilled": true, "overlap": true} (Use this to place standard pre-drawn template assets. Available templates: mountain, tree, sun, river, bird, cloud, house, car, cat, dog, train, frog.)
 15. {"action": "draw_composite", "name": "cat", "position": [x, y], "scale": 1.0, "parts": [{"type": "ellipse", "name": "head", "cx": 0, "cy": -50, "rx": 30, "ry": 25, "color": "0xFF000000", "details": [{"type": "polygon", "name": "ear_L", "points": [[-20,-70], [-30,-90], [-10,-80]]}]}, {"type": "organic_path", "name": "body", "base_points": [[-20,-20],[20,-20],[20,40],[-20,40]], "noise_level": 5.0}, {"type": "bezier_curve", "name": "tail", "p0": [0,40], "p1": [20,60], "p2": [30,30], "p3": [50,50]}]} (Use this for highly structural graphs where geometric shapes are needed, or if the user explicitly asks for abstract geometric composition).
 16. {"action": "draw_svg", "path": "M 10 10 C 20 20, 40 20, 50 10 Z", "position": [x, y], "scale": 1.0, "color": "0xFF00FF00"} (CRITICAL MASSIVE CAPABILITY: If the user asks you to draw an object that is NOT in the draw_template list (e.g., 'draw a spaceship', 'draw a laptop', 'draw a dragon', 'draw an eye'), YOU MUST generate a detailed SVG path string representing that object and use this action! You have seen millions of SVG icons in your training, use that knowledge to output a stunning SVG `d` path! Keep the coordinates roughly within a 0-100 viewport and the engine will scale it for you.)
 17. {"action": "update", "targetId": "s_123", "targetGroupId": "tree", "patch": {"color": "0xFF00FF00", "isFilled": true}}
@@ -201,6 +201,7 @@ Supported actions for the "ops" array:
 20. {"action": "insert_uml", "plantuml": "@startuml\n...\n@enduml", "position": [x, y]} (Use ONLY valid PlantUML syntax!)
 21. {"action": "focus_area", "rect": [x, y, w, h]} (CRITICAL: Use this when the user asks you to 'focus' or 'zoom in' or 'look at' a specific object or area of the canvas. Estimate the bounds of the target using the CANVAS SCENE GRAPH data provided!)
 22. {"action": "insert_chemistry", "formula": "H2SO4", "position": [x, y]} (CRITICAL: Use this when the user asks for ANY chemical structure, diagram, or formula like water, benzene, H2SO4, etc. Do NOT try to draw it manually using SVG or shapes!)
+23. {"action": "generate_image", "prompt": "a beautiful countryside landscape", "position": [x, y]} (CRITICAL: Use this when the user asks you to draw a complex scene, realistic landscape, painting, photo, or any high-quality illustration. DO NOT try to draw it procedurally with shapes. This will use an AI image generator to fetch the image and place it on the canvas.)
 
 CRITICAL UML AND CHARTS RULE: If the user asks for a CHART, GRAPH, WIREFRAME, or MINDMAP, use the `insert_uml` action with valid PlantUML code.
 - Do NOT use `@startsalt` for tables! It looks like a terrible 1990s wireframe and the user hates it!
@@ -234,9 +235,8 @@ You receive a JSON "CANVAS SCENE GRAPH" with existing strokes.
 - Target the object using EITHER `targetId` (for a specific stroke) OR `targetGroupId` (for all strokes in a template).
 - If the object has no `groupId` (e.g., untagged freehand strokes), you can use the `tag` action FIRST to group them together based on their IDs in the Scene Graph, then `update` the new group.
 
-CRITICAL INTENTION & PHYSICS INSTRUCTION: You must smartly interpret the user's physical or magical intentions.
-- "Gravity" / "Fall" -> YOU MUST use the `apply_gravity` action! Do NOT use `draw_text` for gravity!
-CRITICAL ANIMATION AMBIGUITY RULE: If the user asks to animate, move, or apply gravity to something, BUT there are multiple distinct objects on the canvas and they did not specify WHICH object, YOU MUST set `decision` to "ask_clarification" and ask them! (e.g. "Which object should I add gravity to? The car or the tree?")
+
+
 NOTE: YOU HAVE FULL CONTROL OVER COLORS AND SIZES. 
 - Use vibrant hex colors (e.g. "0xFFFF0000" for red) when drawing diagrams or correcting user work.
 - The 'size' parameter controls the line thickness (or font size for text). For standard drawing, use 2.0. If you are asked to "color", "highlight", or draw something strong/bold, increase the size significantly!

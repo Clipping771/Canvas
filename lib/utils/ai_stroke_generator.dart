@@ -10,8 +10,9 @@ class AiStrokeGenerator {
     double w,
     double h,
     Color color,
-    double size,
-  ) {
+    double size, {
+    bool isFilled = false,
+  }) {
     List<Offset> points = [
       Offset(x, y),
       Offset(x + w, y),
@@ -25,10 +26,11 @@ class AiStrokeGenerator {
       color: color,
       size: size,
       toolType: ToolType.pen,
+      isFilled: isFilled,
     );
   }
 
-  static Stroke generatePolygon(List<Offset> points, Color color, double size) {
+  static Stroke generatePolygon(List<Offset> points, Color color, double size, {bool isFilled = false}) {
     if (points.isNotEmpty && points.first != points.last) {
       points.add(points.first); // Close the polygon automatically
     }
@@ -37,6 +39,7 @@ class AiStrokeGenerator {
       color: color,
       size: size,
       toolType: ToolType.pen,
+      isFilled: isFilled,
     );
   }
 
@@ -45,8 +48,9 @@ class AiStrokeGenerator {
     double cy,
     double r,
     Color color,
-    double size,
-  ) {
+    double size, {
+    bool isFilled = false,
+  }) {
     List<Offset> points = [];
     int segments = 36; // smooth enough
     for (int i = 0; i <= segments; i++) {
@@ -59,6 +63,7 @@ class AiStrokeGenerator {
       color: color,
       size: size,
       toolType: ToolType.pen,
+      isFilled: isFilled,
     );
   }
 
@@ -100,8 +105,9 @@ class AiStrokeGenerator {
     double rx,
     double ry,
     Color color,
-    double size,
-  ) {
+    double size, {
+    bool isFilled = false,
+  }) {
     List<Offset> points = [];
     int segments = 40;
     for (int i = 0; i <= segments; i++) {
@@ -113,6 +119,7 @@ class AiStrokeGenerator {
       color: color,
       size: size,
       toolType: ToolType.pen,
+      isFilled: isFilled,
     );
   }
 
@@ -150,8 +157,9 @@ class AiStrokeGenerator {
     List<Offset> basePoints,
     double noiseLevel,
     Color color,
-    double size,
-  ) {
+    double size, {
+    bool isFilled = false,
+  }) {
     if (basePoints.isEmpty) return Stroke(points: [], color: color, size: size, toolType: ToolType.pen);
     final rand = Random();
     List<Offset> noisyPoints = [];
@@ -169,6 +177,7 @@ class AiStrokeGenerator {
       color: color,
       size: size,
       toolType: ToolType.pen,
+      isFilled: isFilled,
     );
   }
 }

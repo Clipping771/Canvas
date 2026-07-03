@@ -94,6 +94,14 @@ class DrawingCanvasPainter extends CustomPainter {
         if (stroke.size != 1.0) {
           canvas.scale(stroke.size, stroke.size);
         }
+        
+        if (stroke.animationProgress != null && stroke.animationProgress! < 1.0) {
+          final progress = stroke.animationProgress!;
+          final width = stroke.decodedImage!.width.toDouble();
+          final height = stroke.decodedImage!.height.toDouble();
+          canvas.clipRect(Rect.fromLTWH(0, 0, width * progress, height));
+        }
+
         canvas.drawImage(stroke.decodedImage!, Offset.zero, imagePaint);
         canvas.restore();
         return;

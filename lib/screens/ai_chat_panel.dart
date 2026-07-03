@@ -1410,6 +1410,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                     toolType: ToolType.pen,
                     imageBytes: imageBytes,
                     decodedImage: decodedImage,
+                    text: 'chemistry',
                   ),
                 );
               } else {

@@ -95,6 +95,8 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
                   notifier.selectStrokesInRect(searchRect);
                   _marqueeStart = null;
                   _marqueeNotifier.value = null;
+                } else if (drawingState.currentTool == ToolType.eraser) {
+                  notifier.commitErasure();
                 } else if (drawingState.currentTool != ToolType.select) {
                   notifier.endStroke();
                 }

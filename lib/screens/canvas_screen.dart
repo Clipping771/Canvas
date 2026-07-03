@@ -27,7 +27,8 @@ import '../core/event_bus.dart';
 import '../widgets/quiz_overlay.dart';
 import '../engine/semantic_camera.dart';
 import '../utils/ai_stroke_generator.dart';
-
+import '../core/theme/da_vinci_theme.dart';
+import '../widgets/gold_glow_container.dart';
 class CanvasScreen extends ConsumerStatefulWidget {
   final String notebookId;
   final String pageId;
@@ -156,11 +157,8 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
 
   @override
   Widget build(BuildContext context) {
-    ref.listen(drawingProvider, (previous, next) {
-      if (previous?.strokes != next.strokes) {
-        CognitiveRuntime().spatialMemory.rebuild(next.strokes);
-      }
-    });
+    // ref.listen(drawingProvider) removed to prevent 60fps QuadTree churn during dragging.
+    // Spatial rebuild is now manually triggered in DrawingProvider (endStroke, loadStrokes, etc).
 
     final notebooks = ref.watch(notebookProvider);
     final notebook = notebooks.firstWhere((n) => n.id == widget.notebookId);
@@ -171,17 +169,11 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     final page = notebook.pages[pageIndex];
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F8F9), // Very pale cyan background
+      backgroundColor: AppColors.background,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: Colors.white.withOpacity(0.8), // Glassmorphic look
-        flexibleSpace: ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(color: Colors.transparent),
-          ),
-        ),
-        foregroundColor: Colors.black87,
+        backgroundColor: AppColors.surface.withOpacity(0.85),
+        foregroundColor: AppColors.textPrimary,
         elevation: 0,
         centerTitle: true,
         scrolledUnderElevation: 0,
@@ -470,7 +462,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
           children: [
             // Infinite Dynamic Background
             Container(
-              color: ref.watch(drawingProvider).canvasBackgroundColor ?? Colors.white,
+              color: ref.watch(drawingProvider).canvasBackgroundColor ?? AppColors.background,
             ),
             // Environment Background
           AnimatedContainer(
@@ -493,6 +485,8 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
             },
             child: CanvasWidget(key: _canvasKey),
           ),
+          if (ref.watch(drawingProvider).showGoldenRatio)
+            const Positioned.fill(child: GoldenRatioOverlay()),
           // Environment Foreground (Frost)
           IgnorePointer(
             child: AnimatedOpacity(
@@ -599,8 +593,8 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
               bottom: 32,
               child: FloatingActionButton(
                 onPressed: _toggleChat,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Colors.white,
+                backgroundColor: AppColors.primary,
+                foregroundColor: AppColors.surface,
                 shape: const CircleBorder(),
                 child: const Icon(CupertinoIcons.chat_bubble_text, size: 28),
               ),
@@ -622,20 +616,10 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(40),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: AppColors.divider),
+        boxShadow: DaVinciTheme.warmShadow,
       ),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -656,6 +640,14 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                   icon: const Icon(Icons.account_tree, color: Colors.black87),
                   tooltip: 'Create UML',
                   onPressed: _showUmlDialog,
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.vignette, 
+                    color: ref.watch(drawingProvider).showGoldenRatio ? AppColors.accent : Colors.black87
+                  ),
+                  tooltip: 'Golden Ratio Overlay',
+                  onPressed: () => ref.read(drawingProvider.notifier).toggleGoldenRatio(),
                 ),
                 Container(
                   width: 1,
@@ -682,6 +674,8 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                 _buildDrawingToolButton(),
                 _buildToolButton(ToolType.highlighter, Icons.highlight),
                 _buildToolButton(ToolType.eraser, _buildEraserIcon),
+                _buildToolButton(ToolType.wire, Icons.cable),
+                _buildToolButton(ToolType.portal, Icons.circle_outlined),
                 Container(
                   width: 1,
                   height: 24,
@@ -718,15 +712,19 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2.0),
-      child: IconButton(
-        icon: Icon(icon, color: isDrawingTool ? Theme.of(context).colorScheme.primary : Colors.black54),
-        onPressed: () {
-          if (isDrawingTool) {
-            _showToolSettingsDialog();
-          } else {
-            ref.read(drawingProvider.notifier).setTool(ToolType.pen);
-          }
-        },
+      child: GoldGlowContainer(
+        isSelected: isDrawingTool,
+        borderRadius: 20,
+        child: IconButton(
+          icon: Icon(icon, color: isDrawingTool ? AppColors.accent : AppColors.primary),
+          onPressed: () {
+            if (isDrawingTool) {
+              _showToolSettingsDialog();
+            } else {
+              ref.read(drawingProvider.notifier).setTool(ToolType.pen);
+            }
+          },
+        ),
       ),
     );
   }
@@ -739,7 +737,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     if (iconOrBuilder is IconData) {
       iconWidget = Icon(
         iconOrBuilder,
-        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.black54,
+        color: isSelected ? AppColors.accent : AppColors.primary,
       );
     } else if (iconOrBuilder is Widget Function(bool)) {
       iconWidget = iconOrBuilder(isSelected);
@@ -749,15 +747,19 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2.0),
-      child: IconButton(
-        icon: iconWidget,
-        onPressed: () {
-          if (isSelected) {
-            _showToolSettingsDialog();
-          } else {
-            ref.read(drawingProvider.notifier).setTool(type);
-          }
-        },
+      child: GoldGlowContainer(
+        isSelected: isSelected,
+        borderRadius: 20,
+        child: IconButton(
+          icon: iconWidget,
+          onPressed: () {
+            if (isSelected) {
+              _showToolSettingsDialog();
+            } else {
+              ref.read(drawingProvider.notifier).setTool(type);
+            }
+          },
+        ),
       ),
     );
   }
@@ -770,7 +772,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
         height: 12,
         decoration: BoxDecoration(
           border: Border.all(
-            color: isSelected ? Theme.of(context).colorScheme.primary : Colors.black54,
+            color: isSelected ? AppColors.accent : AppColors.primary,
             width: 2,
           ),
           borderRadius: BorderRadius.circular(3),
@@ -779,7 +781,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
           children: [
             Expanded(
               child: Container(
-                color: isSelected ? Theme.of(context).colorScheme.primary : Colors.black54,
+                color: isSelected ? AppColors.accent : AppColors.primary,
               ),
             ),
             Expanded(child: Container()),
@@ -804,11 +806,11 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
 
             final colors = [
               Colors.black,
-              Colors.red,
-              Colors.blue,
-              Colors.green,
-              Colors.orange,
-              Colors.purple,
+              AppColors.primaryDark,
+              AppColors.primary,
+              AppColors.accent,
+              AppColors.error,
+              Colors.blueGrey,
               Colors.brown,
             ];
 
@@ -858,24 +860,35 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                     ),
                     const SizedBox(height: 24),
                   ],
-                  const Text(
-                    'Stroke Size',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  Slider(
-                    value: drawingState.currentSize.clamp(
-                      1.0,
-                      drawingState.currentTool == ToolType.eraser ? 80.0 : 20.0,
+                  if (drawingState.currentTool != ToolType.wire && drawingState.currentTool != ToolType.portal) ...[
+                    const Text(
+                      'Quill Nib Size',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     ),
-                    min: 1.0,
-                    max: drawingState.currentTool == ToolType.eraser
-                        ? 80.0
-                        : 20.0,
-                    onChanged: (val) {
-                      notifier.setSize(val);
-                    },
-                  ),
-                  if (drawingState.currentTool != ToolType.eraser) ...[
+                    Row(
+                      children: [
+                        Icon(Icons.edit_outlined, size: 10 + (drawingState.currentSize / 2), color: AppColors.primaryDark),
+                        Expanded(
+                          child: Slider(
+                            value: drawingState.currentSize.clamp(
+                              1.0,
+                              drawingState.currentTool == ToolType.eraser ? 80.0 : 20.0,
+                            ),
+                            min: 1.0,
+                            max: drawingState.currentTool == ToolType.eraser
+                                ? 80.0
+                                : 20.0,
+                            activeColor: AppColors.accent,
+                            inactiveColor: AppColors.primary.withOpacity(0.3),
+                            onChanged: (val) {
+                              notifier.setSize(val);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (drawingState.currentTool != ToolType.eraser && drawingState.currentTool != ToolType.wire && drawingState.currentTool != ToolType.portal) ...[
                     const SizedBox(height: 16),
                     const Text(
                       'Color',
@@ -896,14 +909,28 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                             notifier.setColor(c);
                           },
                           child: Container(
-                            width: 40,
-                            height: 40,
+                            width: 44,
+                            height: 44,
                             decoration: BoxDecoration(
                               color: c,
                               shape: BoxShape.circle,
-                              border: isSelectedColor
-                                  ? Border.all(color: Colors.blue, width: 3)
-                                  : null,
+                              border: Border.all(
+                                color: isSelectedColor ? AppColors.accent : Colors.black26, 
+                                width: isSelectedColor ? 3 : 1
+                              ),
+                              boxShadow: [
+                                if (isSelectedColor)
+                                  BoxShadow(
+                                    color: AppColors.accent.withOpacity(0.5),
+                                    blurRadius: 8,
+                                    spreadRadius: 2,
+                                  ),
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.2),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
                           ),
                         );
@@ -1202,4 +1229,46 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
       ),
     );
   }
+}
+
+class GoldenRatioOverlay extends StatelessWidget {
+  const GoldenRatioOverlay({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: CustomPaint(
+        painter: GoldenRatioPainter(),
+        size: Size.infinite,
+      ),
+    );
+  }
+}
+
+class GoldenRatioPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = AppColors.accent.withOpacity(0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    // Draw a simple golden ratio grid or spiral
+    // For simplicity, we draw the phi grid (1 : 1.618 : 1)
+    final phi = 1.61803398875;
+    final total = 1 + phi + 1;
+    final w1 = size.width / total;
+    final w2 = w1 * phi;
+    final h1 = size.height / total;
+    final h2 = h1 * phi;
+
+    canvas.drawLine(Offset(w1, 0), Offset(w1, size.height), paint);
+    canvas.drawLine(Offset(w1 + w2, 0), Offset(w1 + w2, size.height), paint);
+    
+    canvas.drawLine(Offset(0, h1), Offset(size.width, h1), paint);
+    canvas.drawLine(Offset(0, h1 + h2), Offset(size.width, h1 + h2), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

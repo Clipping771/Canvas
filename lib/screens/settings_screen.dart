@@ -4,6 +4,7 @@ import '../models/ai_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/api_model_fetcher.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../core/theme/da_vinci_theme.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -93,17 +94,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final state = ref.watch(settingsProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9FB), // Light Apple-like gray
+      backgroundColor: AppColors.background, // Da Vinci background
       appBar: AppBar(
         title: const Text(
           'AI Settings',
-          style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87),
+          style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textPrimary),
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
         scrolledUnderElevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black87),
+        iconTheme: const IconThemeData(color: AppColors.primary),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -112,7 +113,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             padding: EdgeInsets.only(bottom: 16.0),
             child: Text(
               'Configure your Agentic AI providers below. Select the active provider using the radio buttons on the left.',
-              style: TextStyle(color: Colors.black54, fontSize: 16),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
             ),
           ),
           ...AiProvider.values
@@ -120,7 +121,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 32),
           const Text(
             'App Appearance',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
           ),
 
           const SizedBox(height: 24),
@@ -143,7 +144,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
       ),
       child: Material(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -152,12 +153,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             children: [
           const Text(
             'App Font',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary),
           ),
           const SizedBox(height: 8),
           const Text(
             'Search and select any Google Font to use across the app.',
-            style: TextStyle(color: Colors.black54),
+            style: TextStyle(color: AppColors.textSecondary),
           ),
           const SizedBox(height: 16),
           Autocomplete<String>(
@@ -224,16 +225,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(24),
-        border: isSelected ? Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.5), width: 2) : null,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        border: isSelected ? Border.all(color: AppColors.accent, width: 2) : null,
+        boxShadow: DaVinciTheme.warmShadow,
       ),
       child: Material(
         color: Colors.transparent,
@@ -246,11 +241,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ref.read(settingsProvider.notifier).setProvider(value);
             }
           },
-          activeColor: Theme.of(context).colorScheme.primary,
+          activeColor: AppColors.accent,
         ),
         title: Text(
           provider.displayName,
-          style: const TextStyle(fontWeight: FontWeight.w600),
+          style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.textPrimary),
         ),
         childrenPadding: const EdgeInsets.all(16),
         children: [
@@ -301,8 +296,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Colors.white,
+                backgroundColor: AppColors.primary,
+                foregroundColor: AppColors.surface,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 elevation: 0,
                 shape: RoundedRectangleBorder(

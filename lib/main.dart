@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'services/storage_service.dart';
-import 'screens/home_screen.dart';
+import 'screens/splash_screen.dart';
 import 'providers/settings_provider.dart';
-
+import 'core/theme/da_vinci_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await StorageService.init();
@@ -13,52 +13,29 @@ void main() async {
   try {
     GoogleFonts.nanumPenScript();
     GoogleFonts.galada();
+    GoogleFonts.cormorantGaramond();
+    GoogleFonts.cinzel();
+    GoogleFonts.crimsonText();
     await GoogleFonts.pendingFonts();
   } catch (e) {
     debugPrint("Warning: Failed to preload fonts: $e");
   }
 
-  runApp(const ProviderScope(child: NoteSketchProApp()));
+  runApp(const ProviderScope(child: VinciBoardApp()));
 }
 
-class NoteSketchProApp extends ConsumerWidget {
-  const NoteSketchProApp({super.key});
+class VinciBoardApp extends ConsumerWidget {
+  const VinciBoardApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
-    final fontName = settings.selectedFont;
-    final fontFamily = GoogleFonts.getFont(fontName).fontFamily;
 
     return MaterialApp(
       title: 'Vinci Board',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: const ColorScheme.light(
-          primary: Color(0xFF4A90E2), // Soft vibrant blue
-          onPrimary: Colors.white,
-          secondary: Color(0xFFFFB3B3), // Soft pastel peach/pink
-          surface: Colors.white,
-          onSurface: Color(0xFF1E1E1E), // Soft black for text
-        ),
-        fontFamily: fontFamily,
-        scaffoldBackgroundColor: Colors.white,
-        appBarTheme: AppBarTheme(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          centerTitle: true,
-          scrolledUnderElevation: 0, // Prevent Material 3 color tint on scroll
-          iconTheme: const IconThemeData(color: Colors.black87),
-          titleTextStyle: TextStyle(
-            color: Colors.black87,
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            fontFamily: fontFamily,
-          ),
-        ),
-      ),
-      home: const HomeScreen(),
+      theme: DaVinciTheme.lightTheme,
+      home: const SplashScreen(),
     );
   }
 }

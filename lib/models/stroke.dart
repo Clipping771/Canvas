@@ -145,8 +145,18 @@ class Stroke {
     _cachedPath = Path();
     if (points.isNotEmpty) {
       _cachedPath!.moveTo(points.first.dx, points.first.dy);
+      
+      List<int> jumpIndices = [];
+      if (customMetadata != null && customMetadata!['jumpIndices'] != null) {
+        jumpIndices = List<int>.from(customMetadata!['jumpIndices']);
+      }
+      
       for (int i = 1; i < points.length; i++) {
-        _cachedPath!.lineTo(points[i].dx, points[i].dy);
+        if (jumpIndices.contains(i)) {
+          _cachedPath!.moveTo(points[i].dx, points[i].dy);
+        } else {
+          _cachedPath!.lineTo(points[i].dx, points[i].dy);
+        }
       }
     }
     return _cachedPath!;

@@ -83,7 +83,7 @@ class MultiIntentRouter {
   }
 
   bool _isPhysicsOrEnvironment(String action) {
-    return ['apply_gravity', 'tween_area', 'trigger_effect'].contains(action);
+    return ['apply_gravity', 'trigger_effect'].contains(action);
   }
 
   bool _isLearningOrBlocking(String action) {

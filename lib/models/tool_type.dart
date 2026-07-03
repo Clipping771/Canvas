@@ -9,4 +9,6 @@ enum ToolType {
   widget,
   brush,
   fill,
+  wire,
+  portal,
 }

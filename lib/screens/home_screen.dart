@@ -7,7 +7,7 @@ import '../models/page.dart';
 import 'settings_screen.dart';
 import '../providers/gamification_provider.dart';
 import '../widgets/gamification_dialog.dart';
-
+import '../core/theme/da_vinci_theme.dart';
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -43,6 +43,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
+    final gamification = ref.watch(gamificationProvider);
+    if (!gamification.isLoaded) {
+      Future.microtask(() => ref.read(gamificationProvider.notifier).init());
+    }
+
     final notebooks = ref.watch(notebookProvider);
 
     // Flatten all pages for the view
@@ -70,8 +75,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
               begin: _topAlignment.value,
               end: _bottomAlignment.value,
               colors: const [
-                Color(0xFFFFEBF0), // Light pink
-                Color(0xFFE3F2FD), // Light blue
+                AppColors.background,
+                AppColors.backgroundAlt,
               ],
             ),
           ),
@@ -94,7 +99,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 28,
-                  color: Color(0xFF1E1E1E),
+                  color: AppColors.textPrimary,
                   letterSpacing: -0.5,
                 ),
               ),
@@ -108,7 +113,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                     child: ActionChip(
                       avatar: const Icon(Icons.star, color: Colors.amber, size: 18),
                       label: Text('Lvl ${gState.level} (${gState.xp} XP)', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      backgroundColor: Colors.white.withOpacity(0.8),
+                      backgroundColor: AppColors.surface.withOpacity(0.8),
                       onPressed: () {
                         showDialog(
                           context: context,
@@ -137,7 +142,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
               child: Container(
                 height: 48,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.surface,
                   borderRadius: BorderRadius.circular(24),
                   boxShadow: [
                     BoxShadow(
@@ -170,7 +175,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                 maxCrossAxisExtent: 220,
                 crossAxisSpacing: 16,
                 mainAxisSpacing: 16,
-                childAspectRatio: 0.85,
+                childAspectRatio: 0.72,
               ),
               delegate: SliverChildBuilderDelegate((context, index) {
                 if (index == 0) {
@@ -202,18 +207,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
         final updatedNotebook = ref.read(notebookProvider).firstWhere((n) => n.id == defaultNotebook.id);
         final newPage = updatedNotebook.pages.last;
         
+        if (!mounted) return;
         Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (_) => CanvasScreen(notebookId: defaultNotebook.id, pageId: newPage.id),
+          PageRouteBuilder(
+            transitionDuration: const Duration(milliseconds: 800),
+            pageBuilder: (context, animation, secondaryAnimation) => 
+                CanvasScreen(notebookId: defaultNotebook.id, pageId: newPage.id),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.02, 0),
+                    end: Offset.zero,
+                  ).animate(CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  )),
+                  child: child,
+                ),
+              );
+            },
           ),
         );
       },
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: const Color(0xFF4A90E2).withOpacity(0.3), width: 2),
+          color: AppColors.background.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.primaryDark.withOpacity(0.4), width: 2, style: BorderStyle.solid),
         ),
         child: Center(
           child: Column(
@@ -221,14 +244,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
             children: [
               Icon(
                 CupertinoIcons.add, 
-                color: const Color(0xFF4A90E2).withOpacity(0.5), 
+                color: AppColors.primaryDark, 
                 size: 40,
               ),
               const SizedBox(height: 12),
               const Text(
-                'New Note',
+                'New Volume',
                 style: TextStyle(
-                  color: Color(0xFF4A90E2),
+                  color: AppColors.primaryDark,
                   fontWeight: FontWeight.w600,
                   fontSize: 16,
                 ),
@@ -261,11 +284,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white,
+                  color: isSelected ? AppColors.primary : AppColors.surface,
                   borderRadius: BorderRadius.circular(24),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(isSelected ? 0.2 : 0.05),
+                      color: Colors.brown.shade900.withOpacity(isSelected ? 0.2 : 0.05),
                       blurRadius: isSelected ? 8 : 4,
                       offset: const Offset(0, 2),
                     ),
@@ -274,7 +297,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                 child: Text(
                   filter,
                   style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.black87,
+                    color: isSelected ? AppColors.surface : AppColors.textSecondary,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                     fontSize: 14,
                   ),
@@ -292,83 +315,91 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (_) =>
+          PageRouteBuilder(
+            transitionDuration: const Duration(milliseconds: 800),
+            pageBuilder: (context, animation, secondaryAnimation) => 
                 CanvasScreen(notebookId: notebookId, pageId: page.id),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.02, 0),
+                    end: Offset.zero,
+                  ).animate(CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  )),
+                  child: child,
+                ),
+              );
+            },
           ),
         );
       },
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(28),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          color: AppColors.primary,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(8),
+            bottomLeft: Radius.circular(8),
+            topRight: Radius.circular(12),
+            bottomRight: Radius.circular(12),
+          ),
+          boxShadow: DaVinciTheme.warmShadow,
+          border: const Border(
+            right: BorderSide(color: AppColors.background, width: 4),
+          ),
         ),
         clipBehavior: Clip.antiAlias,
-        child: Stack(
+        child: Row(
           children: [
-            Positioned.fill(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+            Container(
+              width: 14, 
+              decoration: BoxDecoration(
+                color: AppColors.primaryDark,
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.primaryDark,
+                    AppColors.primaryDark.withOpacity(0.7),
+                    AppColors.primaryDark,
+                  ],
+                ),
+              ),
+            ), // Book spine
+            Expanded(
+              child: Stack(
                 children: [
-                  Expanded(
-                    flex: 3,
-                    child: Container(
-                      color: Colors.white,
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF0F4F8), // Soft blue background
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: page.strokes.isNotEmpty
-                              ? const Icon(
-                                  CupertinoIcons.scribble,
-                                  color: Color(0xFF4A90E2),
-                                  size: 36,
-                                )
-                              : const Text(
-                                  'Empty',
-                                  style: TextStyle(
-                                    color: Color(0xFF4A90E2),
-                                    fontSize: 13,
-                                  ),
-                                ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 2,
+                  Positioned.fill(
                     child: Padding(
-                      padding: const EdgeInsets.all(14.0),
+                      padding: const EdgeInsets.all(16.0),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
+                          Icon(
+                            page.strokes.isNotEmpty ? CupertinoIcons.book : CupertinoIcons.book_circle,
+                            color: AppColors.accent.withOpacity(0.5),
+                            size: 32,
+                          ),
+                          const SizedBox(height: 16),
                           Text(
                             page.title,
                             style: const TextStyle(
-                              color: Colors.black87,
+                              color: AppColors.accent,
                               fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                              letterSpacing: -0.2,
+                              fontSize: 18,
+                              letterSpacing: 0.5,
                             ),
-                            maxLines: 1,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 8),
                           Text(
                             '${page.dateCreated.day} ${_getMonth(page.dateCreated.month)}',
-                            style: const TextStyle(
-                              color: Colors.black54,
+                            style: TextStyle(
+                              color: AppColors.accent.withOpacity(0.7),
                               fontSize: 12,
                             ),
                           ),
@@ -376,9 +407,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                       ),
                     ),
                   ),
-                ],
-              ),
-            ),
             Positioned(
               top: 10,
               right: 10,
@@ -391,7 +419,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                 child: Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.8),
+                    color: AppColors.primaryDark.withOpacity(0.4),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -399,11 +427,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                         ? CupertinoIcons.star_fill
                         : CupertinoIcons.star,
                     color: page.isStarred
-                        ? const Color(0xFFFFB800)
-                        : Colors.grey[400],
+                        ? AppColors.accent
+                        : AppColors.accent.withOpacity(0.3),
                     size: 18,
                   ),
                 ),
+              ),
+            ),
+                ],
               ),
             ),
           ],

@@ -1,7 +1,6 @@
 import 'task_scheduler.dart';
 import 'spatial_memory.dart';
 import 'attention_engine.dart';
-import 'world_simulation.dart';
 import 'avatar_engine.dart';
 import 'prediction_engine.dart';
 import 'physics_engine.dart';
@@ -16,7 +15,6 @@ class CognitiveRuntime {
   late final TaskScheduler scheduler;
   late final SpatialMemory spatialMemory;
   late final AttentionEngine attentionEngine;
-  late final WorldSimulation worldSimulation;
   late final AvatarEngine avatarEngine;
   late final PredictionEngine predictionEngine;
   late final PhysicsEngine physicsEngine;
@@ -30,7 +28,6 @@ class CognitiveRuntime {
     scheduler = TaskScheduler();
     spatialMemory = SpatialMemory();
     attentionEngine = AttentionEngine(spatialMemory);
-    worldSimulation = WorldSimulation();
     avatarEngine = AvatarEngine(spatialMemory);
     predictionEngine = PredictionEngine(spatialMemory, attentionEngine);
     physicsEngine = PhysicsEngine();
@@ -44,7 +41,6 @@ class CognitiveRuntime {
     
     // Register base subsystems
     scheduler.registerSubsystem(attentionEngine);
-    scheduler.registerSubsystem(worldSimulation);
     scheduler.registerSubsystem(avatarEngine);
     scheduler.registerSubsystem(predictionEngine);
     scheduler.registerSubsystem(physicsEngine);

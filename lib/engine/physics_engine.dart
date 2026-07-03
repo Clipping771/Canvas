@@ -55,8 +55,11 @@ class PhysicsEngine {
     }
   }
 
+  Duration _lastTickTime = Duration.zero;
+
   void _startSimulation() {
     if (_ticker == null || !_ticker!.isActive) {
+      _lastTickTime = Duration.zero;
       _ticker = Ticker(_tick)..start();
     }
   }
@@ -68,6 +71,11 @@ class PhysicsEngine {
   void _tick(Duration elapsed) {
     if (_activeStrokes.isEmpty || onPhysicsUpdate == null) return;
     
+    if (elapsed.inMilliseconds - _lastTickTime.inMilliseconds < 33) {
+      return; // Throttle to ~30 FPS
+    }
+    _lastTickTime = elapsed;
+
     bool hasMoved = false;
     final List<Stroke> updatedStrokes = [];
 

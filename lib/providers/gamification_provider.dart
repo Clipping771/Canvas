@@ -6,12 +6,14 @@ class GamificationState {
   final int level;
   final Set<String> unlockedAchievements;
   final Set<String> unlockedSkills;
+  final bool isLoaded;
 
   GamificationState({
     this.xp = 0,
     this.level = 1,
     this.unlockedAchievements = const {},
     this.unlockedSkills = const {},
+    this.isLoaded = false,
   });
 
   GamificationState copyWith({
@@ -19,12 +21,14 @@ class GamificationState {
     int? level,
     Set<String>? unlockedAchievements,
     Set<String>? unlockedSkills,
+    bool? isLoaded,
   }) {
     return GamificationState(
       xp: xp ?? this.xp,
       level: level ?? this.level,
       unlockedAchievements: unlockedAchievements ?? this.unlockedAchievements,
       unlockedSkills: unlockedSkills ?? this.unlockedSkills,
+      isLoaded: isLoaded ?? this.isLoaded,
     );
   }
 }
@@ -33,13 +37,16 @@ class GamificationNotifier extends Notifier<GamificationState> {
   static const String _xpKey = 'notesketch_xp';
   static const String _achievementsKey = 'notesketch_achievements';
 
+  bool _isInitialized = false;
+
   @override
   GamificationState build() {
-    _loadState();
-    return GamificationState();
+    return GamificationState(isLoaded: false);
   }
 
-  Future<void> _loadState() async {
+  Future<void> init() async {
+    if (_isInitialized) return;
+    _isInitialized = true;
     final prefs = await SharedPreferences.getInstance();
     final xp = prefs.getInt(_xpKey) ?? 0;
     final achievements = prefs.getStringList(_achievementsKey)?.toSet() ?? {};
@@ -51,6 +58,7 @@ class GamificationNotifier extends Notifier<GamificationState> {
       level: level,
       unlockedAchievements: achievements,
       unlockedSkills: skills,
+      isLoaded: true,
     );
   }
 

@@ -39,11 +39,12 @@ class DrawingState {
   final CanvasEnvironment canvasEnvironment;
   final EasterEggEffect? activeEffect;
   final DateTime? effectTriggerTime;
-  final ShapeType? lastDetectedShape;
-  final Rect? lastDetectedShapeBounds;
+  
+  
   final Color? canvasBackgroundColor;
   final String? aiStatus; // Null when not active
   final Offset? aiStatusTarget; // Target position in canvas coordinates
+  final bool showGoldenRatio;
 
   DrawingState({
     this.strokes = const [],
@@ -60,11 +61,12 @@ class DrawingState {
     this.canvasEnvironment = CanvasEnvironment.normal,
     this.activeEffect,
     this.effectTriggerTime,
-    this.lastDetectedShape,
-    this.lastDetectedShapeBounds,
+    
+    
     this.canvasBackgroundColor = Colors.white,
     this.aiStatus,
     this.aiStatusTarget,
+    this.showGoldenRatio = false,
   });
 
   DrawingState copyWith({
@@ -82,8 +84,8 @@ class DrawingState {
     CanvasEnvironment? canvasEnvironment,
     EasterEggEffect? activeEffect,
     DateTime? effectTriggerTime,
-    ShapeType? lastDetectedShape,
-    Rect? lastDetectedShapeBounds,
+    
+    
     bool clearSelection = false,
     bool clearPreview = false,
     bool clearLastAdded = false,
@@ -92,6 +94,7 @@ class DrawingState {
     String? aiStatus,
     Offset? aiStatusTarget,
     bool clearAiStatus = false,
+    bool? showGoldenRatio,
   }) {
     return DrawingState(
       strokes: strokes ?? this.strokes,
@@ -118,13 +121,11 @@ class DrawingState {
       effectTriggerTime: clearEasterEgg
           ? null
           : (effectTriggerTime ?? this.effectTriggerTime),
-      lastDetectedShape: lastDetectedShape ?? this.lastDetectedShape,
-      lastDetectedShapeBounds:
-          lastDetectedShapeBounds ?? this.lastDetectedShapeBounds,
       canvasBackgroundColor:
           canvasBackgroundColor ?? this.canvasBackgroundColor,
       aiStatus: clearAiStatus ? null : (aiStatus ?? this.aiStatus),
       aiStatusTarget: clearAiStatus ? null : (aiStatusTarget ?? this.aiStatusTarget),
+      showGoldenRatio: showGoldenRatio ?? this.showGoldenRatio,
     );
   }
 }
@@ -137,6 +138,22 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
   static List<Stroke> clipboard = [];
   Stroke? _currentStroke;
+
+  void toggleGoldenRatio() {
+    state = state.copyWith(showGoldenRatio: !state.showGoldenRatio);
+  }
+
+  /// Enable physics on all strokes belonging to [groupId] and start simulation.
+  void applyGravityToGroup(String groupId) {
+    _pushUndo();
+    final newStrokes = state.strokes.map((s) {
+      if (s.groupId == groupId || s.id == groupId || s.name == groupId) {
+        return s.copyWith(physicsEnabled: true);
+      }
+      return s;
+    }).toList();
+    state = state.copyWith(strokes: newStrokes);
+  }
 
   void selectAll() {
     if (state.strokes.isEmpty) return;
@@ -349,6 +366,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
         
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
       
     state = state.copyWith(
       strokes: remaining,
@@ -392,6 +410,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
     
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
       
     final List<Stroke> pasted = clipboard.map((s) {
       return Stroke(
@@ -450,6 +469,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     final List<Stroke> newStrokes = List.from(state.strokes);
     for (int i = 0; i < state.selectedStrokes.length; i++) {
@@ -474,6 +494,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
     // Save state BEFORE starting a new stroke for Undo purposes
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     state = state.copyWith(
       undoHistory: newUndoHistory,
@@ -553,62 +574,6 @@ class DrawingNotifier extends Notifier<DrawingState> {
       }
       Rect currentBounds = Rect.fromLTRB(minX, minY, maxX, maxY);
 
-      // Auto-correct shapes if in discovery mode
-      if (state.easterEggMode == EasterEggMode.discovery) {
-        final shapeType = ShapeRecognizer.recognize(_currentStroke!.points);
-        if (shapeType != ShapeType.unknown) {
-          // Hybrid Combo Check: Black Hole
-          bool triggeredBlackHole = false;
-          if (shapeType == ShapeType.spiral &&
-              state.lastDetectedShape == ShapeType.circle &&
-              state.lastDetectedShapeBounds != null) {
-            // Check if spiral is inside circle bounds
-            if (state.lastDetectedShapeBounds!.overlaps(currentBounds)) {
-              triggeredBlackHole = true;
-            }
-          }
-
-          if (triggeredBlackHole) {
-            ref
-                .read(gamificationProvider.notifier)
-                .unlockAchievement('black_hole');
-            state = state.copyWith(
-              activeEffect: EasterEggEffect.blackHole, // We need to add this
-              effectTriggerTime: DateTime.now(),
-              lastDetectedShape: null,
-            );
-          } else {
-            // Normal Autocorrect
-            final perfectPoints = ShapeRecognizer.generatePerfectShape(
-              shapeType,
-              _currentStroke!.points,
-            );
-            final updatedStroke = Stroke(
-              points: perfectPoints,
-              color: _currentStroke!.color,
-              size: _currentStroke!.size,
-              toolType: _currentStroke!.toolType,
-            );
-            _currentStroke = updatedStroke;
-            final updatedStrokes = List<Stroke>.from(state.strokes);
-            updatedStrokes[updatedStrokes.length - 1] = updatedStroke;
-
-            state = state.copyWith(
-              strokes: updatedStrokes,
-              activeEffect: EasterEggEffect.none,
-              effectTriggerTime: DateTime.now(),
-              lastDetectedShape: shapeType,
-              lastDetectedShapeBounds: currentBounds,
-            );
-
-            ref.read(gamificationProvider.notifier).addXp(20);
-            ref
-                .read(gamificationProvider.notifier)
-                .unlockAchievement('shape_master');
-          }
-        }
-      }
-
       ref.read(gamificationProvider.notifier).addXp(5);
 
       if (maxX != double.negativeInfinity) {
@@ -643,6 +608,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
         final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
           ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
         final newStrokes = List<Stroke>.from(state.strokes);
         newStrokes.insert(i, filledStroke);
 
@@ -664,7 +630,8 @@ class DrawingNotifier extends Notifier<DrawingState> {
         .removeLast(); // Get the state before the last stroke
 
     final newRedoHistory = List<List<Stroke>>.from(state.redoHistory)
-      ..add(List.from(state.strokes)); // Save current state to redo
+      ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes); // Save current state to redo
 
     state = state.copyWith(
       strokes: previousStrokes,
@@ -681,6 +648,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     state = state.copyWith(
       strokes: nextStrokes,
@@ -693,6 +661,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
     if (state.strokes.isNotEmpty) {
       final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
         ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
       state = state.copyWith(
         strokes: [],
@@ -707,6 +676,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     final newStrokes = state.strokes.where((stroke) {
       if (stroke.text != null) {
@@ -727,6 +697,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     final lowercased = textToErase.toLowerCase();
     final newStrokes = state.strokes.where((stroke) {
@@ -749,6 +720,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
     // Save state BEFORE erasing for Undo purposes
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     final newStrokes = List<Stroke>.from(state.strokes)
       ..removeWhere((s) => strokesToRemove.contains(s));
@@ -805,6 +777,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     if (state.easterEggMode != EasterEggMode.focus) {
       // Bouncy Paste Animation!
@@ -873,6 +846,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     state = state.copyWith(
       strokes: [...state.strokes, ...newStrokes],
@@ -886,6 +860,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     final newStrokes = List<Stroke>.from(state.strokes);
     final countToMove = count.clamp(0, newStrokes.length);
@@ -925,6 +900,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
     final newStrokes = List<Stroke>.from(state.strokes);
 
     bool madeChanges = false;
@@ -997,131 +973,12 @@ class DrawingNotifier extends Notifier<DrawingState> {
     }
   }
 
-  Future<void> tweenStrokes(
-    List<TweenData> tweens, {
-    int durationMs = 1000,
-  }) async {
-    if (state.strokes.isEmpty || tweens.isEmpty) return;
-
-    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
-      ..add(List.from(state.strokes));
-
-    // For each tween, find matching strokes
-    // Store which stroke maps to which TweenData
-    Map<int, int> strokeToTweenIndex = {};
-    List<Stroke> originalTargetStrokes = [];
-    List<Offset> strokeCenters = [];
-    List<int> targetStrokeIndices = [];
-
-    for (int t = 0; t < tweens.length; t++) {
-      final tweenBounds = tweens[t].bounds;
-
-      for (int i = 0; i < state.strokes.length; i++) {
-        // Skip if already assigned to a tween to prevent double-transforming
-        if (strokeToTweenIndex.containsKey(i)) continue;
-
-        final stroke = state.strokes[i];
-
-        final sBounds = stroke.bounds;
-        final sMinX = sBounds.left;
-        final sMinY = sBounds.top;
-        final sMaxX = sBounds.right;
-        final sMaxY = sBounds.bottom;
-
-        final strokeRect = Rect.fromLTRB(
-          sMinX - 10,
-          sMinY - 10,
-          sMaxX + 10,
-          sMaxY + 10,
-        );
-
-        if (strokeRect.overlaps(tweenBounds)) {
-          strokeToTweenIndex[i] = t;
-          targetStrokeIndices.add(i);
-          originalTargetStrokes.add(stroke);
-          strokeCenters.add(Offset((sMinX + sMaxX) / 2, (sMinY + sMaxY) / 2));
-        }
-      }
-    }
-
-    if (targetStrokeIndices.isEmpty) return;
-
-    // 2. Run the tween loop at 60 FPS
-    final int frames = (durationMs / 16).ceil();
-    if (frames <= 0) return;
-
-    for (int frame = 1; frame <= frames; frame++) {
-      final double progress = frame / frames;
-
-      // Quadratic Easing (EaseInOut)
-      final double easedProgress = progress < 0.5
-          ? 2 * progress * progress
-          : 1 - math.pow(-2 * progress + 2, 2) / 2;
-
-      final currentStrokes = List<Stroke>.from(state.strokes);
-
-      for (int i = 0; i < targetStrokeIndices.length; i++) {
-        final strokeIdx = targetStrokeIndices[i];
-        final tweenIdx = strokeToTweenIndex[strokeIdx]!;
-        final tween = tweens[tweenIdx];
-
-        final currentDx = tween.dx * easedProgress;
-        final currentDy = tween.dy * easedProgress;
-        final currentScale = 1.0 + (tween.scale - 1.0) * easedProgress;
-        final currentRotation = tween.rotation * easedProgress;
-
-        final originalStroke = originalTargetStrokes[i];
-        final center = strokeCenters[i];
-
-        final newPoints = originalStroke.points.map((p) {
-          double translatedX = p.dx - center.dx;
-          double translatedY = p.dy - center.dy;
-
-          if (currentRotation != 0.0) {
-            final double cosR = math.cos(currentRotation);
-            final double sinR = math.sin(currentRotation);
-            final double rx = translatedX * cosR - translatedY * sinR;
-            final double ry = translatedX * sinR + translatedY * cosR;
-            translatedX = rx;
-            translatedY = ry;
-          }
-
-          if (currentScale != 1.0) {
-            translatedX *= currentScale;
-            translatedY *= currentScale;
-          }
-
-          return Offset(
-            translatedX + center.dx + currentDx,
-            translatedY + center.dy + currentDy,
-          );
-        }).toList();
-
-        currentStrokes[strokeIdx] = Stroke(
-          points: newPoints,
-          color: originalStroke.color,
-          size: originalStroke.size * currentScale,
-          rotation: originalStroke.rotation + currentRotation,
-          toolType: originalStroke.toolType,
-          imageBytes: originalStroke.imageBytes,
-          decodedImage: originalStroke.decodedImage,
-          text: originalStroke.text,
-        );
-      }
-
-      state = state.copyWith(strokes: currentStrokes, redoHistory: []);
-      await Future.delayed(const Duration(milliseconds: 16));
-    }
-
-    // Finally save to undo history
-    state = state.copyWith(undoHistory: newUndoHistory);
-  }
-
   void removeStrokes(List<Stroke> strokesToRemove) {
     if (strokesToRemove.isEmpty) return;
 
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
       ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
     final currentStrokes = List<Stroke>.from(state.strokes);
     currentStrokes.removeWhere((s) => strokesToRemove.contains(s));
@@ -1150,6 +1007,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
       final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
         ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
       if (stroke.text != null && stroke.toolType != ToolType.latex) {
         final fullText = stroke.text!;
@@ -1391,9 +1249,110 @@ class DrawingNotifier extends Notifier<DrawingState> {
     }
   }
 
+  void _enforceHistoryLimit(List<List<Stroke>> history, List<List<Stroke>> redoHistory, List<Stroke> currentStrokes) {
+    while (history.length > 50) {
+      final discarded = history.removeAt(0);
+      for (final stroke in discarded) {
+        if (stroke.decodedImage != null) {
+          bool isReferenced = false;
+          
+          for (final s in currentStrokes) {
+            if (s.decodedImage == stroke.decodedImage) {
+              isReferenced = true;
+              break;
+            }
+          }
+          if (isReferenced) continue;
+          
+          for (final snapshot in history) {
+            for (final s in snapshot) {
+              if (s.decodedImage == stroke.decodedImage) {
+                isReferenced = true;
+                break;
+              }
+            }
+            if (isReferenced) break;
+          }
+          if (isReferenced) continue;
+          
+          for (final snapshot in redoHistory) {
+            for (final s in snapshot) {
+              if (s.decodedImage == stroke.decodedImage) {
+                isReferenced = true;
+                break;
+              }
+            }
+            if (isReferenced) break;
+          }
+          if (isReferenced) continue;
+          
+          stroke.decodedImage!.dispose();
+        }
+      }
+    }
+  }
+
+  void commitErasure() {
+    if (_currentStroke == null || _currentStroke!.toolType != ToolType.eraser || state.strokes.isEmpty) {
+      return;
+    }
+
+    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
+      ..add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
+
+    double eMinX = double.infinity, eMinY = double.infinity;
+    double eMaxX = double.negativeInfinity, eMaxY = double.negativeInfinity;
+    for (var p in _currentStroke!.points) {
+      if (p.dx < eMinX) eMinX = p.dx;
+      if (p.dy < eMinY) eMinY = p.dy;
+      if (p.dx > eMaxX) eMaxX = p.dx;
+      if (p.dy > eMaxY) eMaxY = p.dy;
+    }
+    
+    final eraserRadius = _currentStroke!.size;
+    final eraserBounds = Rect.fromLTRB(
+      eMinX - eraserRadius, 
+      eMinY - eraserRadius, 
+      eMaxX + eraserRadius, 
+      eMaxY + eraserRadius
+    );
+
+    final eraserPoints = _currentStroke!.points;
+    final radiusSq = eraserRadius * eraserRadius;
+
+    final newStrokes = state.strokes.where((stroke) {
+      if (!stroke.bounds.overlaps(eraserBounds)) {
+        return true; 
+      }
+      if (stroke.text != null) {
+        final p = stroke.points.first;
+        for (final ep in eraserPoints) {
+          if ((p - ep).distanceSquared <= radiusSq) return false; 
+        }
+        return true;
+      }
+      for (final sp in stroke.points) {
+        for (final ep in eraserPoints) {
+          if ((sp - ep).distanceSquared <= radiusSq) {
+            return false; 
+          }
+        }
+      }
+      return true;
+    }).toList();
+
+    _currentStroke = null;
+
+    if (newStrokes.length != state.strokes.length) {
+      state = state.copyWith(strokes: newStrokes, undoHistory: newUndoHistory, redoHistory: []);
+    }
+  }
+
   void _pushUndo() {
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory);
     newUndoHistory.add(List.from(state.strokes));
+    _enforceHistoryLimit(newUndoHistory, [], state.strokes);
     if (newUndoHistory.length > 50) newUndoHistory.removeAt(0);
     state = state.copyWith(undoHistory: newUndoHistory, redoHistory: []);
   }

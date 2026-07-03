@@ -63,7 +63,10 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     });
     _cancelSub = EventBus().subscribe(EventType.cancelGeneration, (_) {
       if (_isTyping) {
-        setState(() => _cancelRequested = true);
+        setState(() {
+          _cancelRequested = true;
+          AiAgentService.cancelRequest();
+        });
         if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
           _cancelCompleter!.complete("Cancelled by user");
         }
@@ -94,6 +97,13 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
   }
 
   void _sendMessage() async {
+    if (_isTyping) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please wait for the current request to finish.')),
+      );
+      return;
+    }
+
     final text = _textController.text.trim();
     if (text.isEmpty) return;
 
@@ -578,7 +588,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       }
     } catch (e) {
       if (mounted) {
-        chatNotifier.addMessage({'sender': 'ai', 'text': 'Error: $e'});
+        debugPrint("AI Chat Panel Raw Error: $e");
+        chatNotifier.addMessage({'sender': 'ai', 'text': 'Network error, please check your connection.'});
       }
     } finally {
       if (mounted) {
@@ -601,8 +612,6 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     int objectsUpdated = 0;
     int objectsRemoved = 0;
     final unrecognized = <String>[];
-    final tweens = <TweenData>[];
-    int maxTweenDuration = 1000;
 
     final transform = widget.getTransform?.call();
     Matrix4 inverse;
@@ -878,67 +887,20 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             }
           }
           continue;
-        } else if (type == 'tween_area') {
-          final rectData = action['rect'] as List?;
-          if (rectData == null || rectData.length < 4) continue;
-          final p1 = mapPoint(rectData[0].toDouble(), rectData[1].toDouble());
-          final p2 = mapPoint(
-            rectData[0].toDouble() + rectData[2].toDouble(),
-            rectData[1].toDouble() + rectData[3].toDouble(),
-          );
-          final bounds = Rect.fromPoints(p1, p2);
-
-          final scaleAxis = inverse.getMaxScaleOnAxis();
-          final dxRaw = (action['dx'] as num?)?.toDouble() ?? 0.0;
-          final dyRaw = (action['dy'] as num?)?.toDouble() ?? 0.0;
-
-          final dx = (dxRaw / 2.0) * scaleAxis;
-          final dy = (dyRaw / 2.0) * scaleAxis;
-          final offset =
-              MatrixUtils.transformPoint(inverse, Offset(dx, dy)) -
-              MatrixUtils.transformPoint(inverse, Offset.zero);
-
-          final scale = (action['scale'] as num?)?.toDouble() ?? 1.0;
-          final rotation = (action['rotation'] as num?)?.toDouble() ?? 0.0;
-          final duration = (action['duration_ms'] as num?)?.toInt() ?? 1000;
-          if (duration > maxTweenDuration) maxTweenDuration = duration;
-
-          tweens.add(TweenData(bounds, offset.dx, offset.dy, scale, rotation));
-          continue;
         } else if (type == 'apply_gravity') {
-          final targetId = action['targetId'] as String?;
           final targetGroupId = action['targetGroupId'] as String?;
-          final scaleAxis = inverse.getMaxScaleOnAxis();
-          final duration = 2000;
-          if (duration > maxTweenDuration) maxTweenDuration = duration;
           
-          final currentStrokes = ref.read(drawingProvider).strokes;
-          Iterable<Stroke> targetStrokes = currentStrokes;
-          
-          if (targetId != null) {
-            targetStrokes = currentStrokes.where((s) => s.id == targetId);
-          } else if (targetGroupId != null) {
-            targetStrokes = currentStrokes.where((s) => s.groupId == targetGroupId);
+          if (targetGroupId != null) {
+            drawingNotifier.applyGravityToGroup(targetGroupId);
           } else {
             // Apply to the most recently added group if no target is specified
+            final currentStrokes = ref.read(drawingProvider).strokes;
             if (currentStrokes.isNotEmpty) {
               final lastGroupId = currentStrokes.last.groupId;
               if (lastGroupId != null) {
-                targetStrokes = currentStrokes.where((s) => s.groupId == lastGroupId);
-              } else {
-                targetStrokes = [currentStrokes.last];
+                drawingNotifier.applyGravityToGroup(lastGroupId);
               }
-            } else {
-              targetStrokes = [];
             }
-          }
-          
-          for (var stroke in targetStrokes) {
-            final dy = (1000.0 / 1.0) * scaleAxis; // Large drop
-            final offset =
-                MatrixUtils.transformPoint(inverse, Offset(0, dy)) -
-                MatrixUtils.transformPoint(inverse, Offset.zero);
-            tweens.add(TweenData(stroke.bounds, offset.dx, offset.dy, 1.0, 0.0));
           }
           objectsUpdated++; // Prevent fallback
           continue;
@@ -1563,13 +1525,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
        EventBus().publish(EventType.aiTaskCompleted, {'intent': CameraIntent.hardFocus});
     }
 
-    if (tweens.isNotEmpty || newStrokes.isNotEmpty || objectsAdded > 0) {
+    if (newStrokes.isNotEmpty || objectsAdded > 0) {
       drawingNotifier.setAiStatus(null);
       widget.onDrawStart?.call();
-    }
-
-    if (tweens.isNotEmpty) {
-      await drawingNotifier.tweenStrokes(tweens, durationMs: maxTweenDuration);
     }
 
     if (newStrokes.isNotEmpty) {
@@ -1581,7 +1539,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       }
     }
 
-    if (mounted && (tweens.isNotEmpty || newStrokes.isNotEmpty || objectsAdded > 0)) {
+    if (mounted && (newStrokes.isNotEmpty || objectsAdded > 0)) {
       widget.onDrawEnd?.call(finalMaxY);
     }
 
@@ -1613,11 +1571,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
     final messages = ref.watch(aiChatProvider).messages;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
+    return Container(
           width: math.min(350, MediaQuery.of(context).size.width - 32),
           height: math.min(500, MediaQuery.of(context).size.height - 250),
           margin: EdgeInsets.only(
@@ -1884,7 +1838,10 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                         ),
                         onPressed: _isTyping 
                             ? () {
-                                setState(() => _cancelRequested = true);
+                                setState(() {
+                                  _cancelRequested = true;
+                                  AiAgentService.cancelRequest();
+                                });
                                 if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
                                   _cancelCompleter!.complete("Cancelled by user");
                                 }
@@ -1898,9 +1855,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               ),
             ],
           ),
-        ),
-      ),
-    );
+        );
   }
 }
 

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../utils/city_matcher.dart';
 import '../models/ai_provider.dart';
@@ -14,6 +15,10 @@ enum AiTutorMode {
 }
 
 class AiAgentService {
+  static bool _isRequestInProgress = false;
+  static DateTime? _lastRequestTime;
+  static http.Client? _activeClient;
+
   /// Sends the canvas image to the AI agent and returns its response.
   static Future<String> askAgent({
     required List<int> imageBytes,
@@ -26,99 +31,113 @@ class AiAgentService {
     double baseAmbiguityScore = 0.0,
     AiTutorMode tutorMode = AiTutorMode.normal,
   }) async {
-    if (apiKey.isEmpty) {
-      return "Error: Please enter an API key for ${provider.displayName} in Settings first.";
+    if (_isRequestInProgress) {
+      throw Exception('A request is already in progress. Please wait.');
     }
+    
+    final now = DateTime.now();
+    if (_lastRequestTime != null && now.difference(_lastRequestTime!).inSeconds < 1) {
+      throw Exception('Too many requests. Please wait a moment.');
+    }
+    
+    _isRequestInProgress = true;
+    _lastRequestTime = now;
+    _activeClient = http.Client();
 
-    final rulesList = await MemoryService.getRules();
-    final memorySection = rulesList.isNotEmpty
-        ? "\n\nCRITICAL MEMORY: You have learned the following rules from past mistakes. You MUST obey these rules:\n${rulesList.map((r) => "- $r").join("\n")}"
-        : "";
-
-    String historySection = "\n\n--- STRUCTURED MEMORY WINDOW (Last 5 turns) ---\n";
-    for (var msg in chatHistory.take(5)) {
-      final sender = msg['sender']?.toUpperCase() ?? 'USER';
-      final text = msg['text'] ?? '';
-      if (sender == 'AI') {
-         if (text.contains('System: Ops blocked')) {
-            historySection += "System Enforcement: $text\n";
-         } else if (text.length > 50) {
-            historySection += "Last Intentful Action: $text\n";
-         } else {
-            historySection += "AI Message: $text\n";
-         }
-      } else {
-         historySection += "USER: $text\n";
+    try {
+      if (apiKey.isEmpty) {
+        return "Error: Please enter an API key for ${provider.displayName} in Settings first.";
       }
-    }
-    historySection += "------------------------------------------\n";
 
-    String liveContext = "";
-    
-    // Only look at the current prompt and the very last message to prevent being permanently stuck in weather mode
-    final lastMessage = chatHistory.isNotEmpty ? chatHistory.last['text']?.toLowerCase() ?? '' : '';
-    final recentContext = "${prompt.toLowerCase()} $lastMessage";
-    
-    if (recentContext.contains("temp") || recentContext.contains("weather") || recentContext.contains("forecast") || recentContext.contains("rain") || recentContext.contains("sun")) {
-      try {
-        // Try regex first (added 'about' to catch "what about dhaka")
-        final regex = RegExp(
-          r'(?:in|for|at|of|about)\s+([a-zA-Z]+)',
-          caseSensitive: false,
-        );
-        final match = regex.firstMatch(prompt.toLowerCase()); // Look in current prompt first
-        final fallbackMatch = regex.firstMatch(recentContext);
-        final actualMatch = match ?? fallbackMatch;
-        
-        String? detectedCity;
+      final rulesList = await MemoryService.getRules();
+      final memorySection = rulesList.isNotEmpty
+          ? "\n\nCRITICAL MEMORY: You have learned the following rules from past mistakes. You MUST obey these rules:\n${rulesList.map((r) => "- $r").join("\n")}"
+          : "";
 
-        if (actualMatch != null) {
-          detectedCity = CityMatcher.findBestMatch(actualMatch.group(1)!);
+      String historySection = "\n\n--- STRUCTURED MEMORY WINDOW (Last 5 turns) ---\n";
+      for (var msg in chatHistory.take(5)) {
+        final sender = msg['sender']?.toUpperCase() ?? 'USER';
+        final text = msg['text'] ?? '';
+        if (sender == 'AI') {
+           if (text.contains('System: Ops blocked')) {
+              historySection += "System Enforcement: $text\n";
+           } else if (text.length > 50) {
+              historySection += "Last Intentful Action: $text\n";
+           } else {
+              historySection += "AI Message: $text\n";
+           }
+        } else {
+           historySection += "USER: $text\n";
         }
+      }
+      historySection += "------------------------------------------\n";
 
-        // If regex fails, fallback to token fuzzy matching on recent context
-        if (detectedCity == null) {
-          final words = recentContext.split(RegExp(r'\W+'));
-          for (final word in words) {
-            if (word.length >= 3) {
-              final best = CityMatcher.findBestMatch(
-                word,
-                threshold: 0.75,
-              ); // stricter threshold for single words
-              if (best != null) {
-                detectedCity = best;
-                break;
+      String liveContext = "";
+      
+      // Only look at the current prompt and the very last message to prevent being permanently stuck in weather mode
+      final lastMessage = chatHistory.isNotEmpty ? chatHistory.last['text']?.toLowerCase() ?? '' : '';
+      final recentContext = "${prompt.toLowerCase()} $lastMessage";
+      
+      if (recentContext.contains("temp") || recentContext.contains("weather") || recentContext.contains("forecast") || recentContext.contains("rain") || recentContext.contains("sun")) {
+        try {
+          // Try regex first (added 'about' to catch "what about dhaka")
+          final regex = RegExp(
+            r'(?:in|for|at|of|about)\s+([a-zA-Z]+)',
+            caseSensitive: false,
+          );
+          final match = regex.firstMatch(prompt.toLowerCase()); // Look in current prompt first
+          final fallbackMatch = regex.firstMatch(recentContext);
+          final actualMatch = match ?? fallbackMatch;
+          
+          String? detectedCity;
+
+          if (actualMatch != null) {
+            detectedCity = CityMatcher.findBestMatch(actualMatch.group(1)!);
+          }
+
+          // If regex fails, fallback to token fuzzy matching on recent context
+          if (detectedCity == null) {
+            final words = recentContext.split(RegExp(r'\W+'));
+            for (final word in words) {
+              if (word.length >= 3) {
+                final best = CityMatcher.findBestMatch(
+                  word,
+                  threshold: 0.75,
+                ); // stricter threshold for single words
+                if (best != null) {
+                  detectedCity = best;
+                  break;
+                }
               }
             }
           }
-        }
 
-        String url =
-            'https://wttr.in/?format=%t+%C+%l'; // Default to auto-location
-        if (detectedCity != null) {
-          url = 'https://wttr.in/$detectedCity?format=%t+%C';
-        }
-
-        final response = await http.get(Uri.parse(url));
-        if (response.statusCode == 200) {
-          liveContext =
-              "\nLIVE INTERNET DATA: The current weather for ${detectedCity ?? 'the user'} is ${response.body.trim()}.\n";
+          String url =
+              'https://wttr.in/?format=%t+%C+%l'; // Default to auto-location
           if (detectedCity != null) {
-            liveContext +=
-                "CRITICAL CONTEXT: The user is currently talking about $detectedCity. If you use the insert_widget action for weather, YOU MUST set the city to \"$detectedCity\".\n";
+            url = 'https://wttr.in/$detectedCity?format=%t+%C';
           }
+
+          final response = await http.get(Uri.parse(url));
+          if (response.statusCode == 200) {
+            liveContext =
+                "\nLIVE INTERNET DATA: The current weather for ${detectedCity ?? 'the user'} is ${response.body.trim()}.\n";
+            if (detectedCity != null) {
+              liveContext +=
+                  "CRITICAL CONTEXT: The user is currently talking about $detectedCity. If you use the insert_widget action for weather, YOU MUST set the city to \"$detectedCity\".\n";
+            }
+          }
+        } catch (e) {
+          // ignore
         }
-      } catch (e) {
-        // ignore
       }
-    }
 
-    final objectsContext = canvasObjects.isNotEmpty
-        ? "\n\nCANVAS SCENE GRAPH (Current Objects):\n${jsonEncode(canvasObjects)}\n\n"
-        : "";
+      final objectsContext = canvasObjects.isNotEmpty
+          ? "\n\nCANVAS SCENE GRAPH (Current Objects):\n${jsonEncode(canvasObjects)}\n\n"
+          : "";
 
-    final String systemInstruction =
-        '''You are VinciBoard's AI Agent, an interactive AI Living Universe where drawings come to life.
+      final String systemInstruction =
+          '''You are VinciBoard's AI Agent, an interactive AI Living Universe where drawings come to life.
 You have the ability to draw, write, simulate physics, and interact directly on the user's canvas.
 
 [TUTOR MODE: ${tutorMode.name.toUpperCase()}]
@@ -170,7 +189,6 @@ Supported actions for the "ops" array:
 8. {"action": "erase_rect", "rect": [x, y, w, h]}
 9. {"action": "delete_area", "rect": [x, y, w, h]}
 10. {"action": "undo", "count": 1}
-11. {"action": "tween_area", "rect": [x, y, w, h], "dx": 20, "dy": 0, "scale": 1.0, "rotation": 0.0, "duration_ms": 2000}
 12. {"action": "learn_rule", "rule": "Never draw over the image"}
 13. {"action": "insert_widget", "type": "weather", "city": "London", "position": [x, y], "days": 3} (You can set days up to 7 if requested)
 14. {"action": "draw_template", "name": "frog", "position": [x, y], "size": 100, "isFilled": false} (CRITICAL: If the user asks for ANY of these exactly: frog, dog, car, house, tree, train, cat, YOU MUST use this action! DO NOT draw them manually using shapes!)
@@ -216,23 +234,9 @@ You receive a JSON "CANVAS SCENE GRAPH" with existing strokes.
 - Target the object using EITHER `targetId` (for a specific stroke) OR `targetGroupId` (for all strokes in a template).
 - If the object has no `groupId` (e.g., untagged freehand strokes), you can use the `tag` action FIRST to group them together based on their IDs in the Scene Graph, then `update` the new group.
 
-CRITICAL INTENTION & PHYSICS INSTRUCTION: You must smartly interpret the user's physical or magical intentions and translate them into `tween_area` parameters! 
-- "Anti-gravity" / "Float" / "Fly" -> large negative `dy` (e.g. -600)
-- "Wind" / "Blow away" -> large `dx` (e.g. 800)
-- "Spin" / "Rotate" -> adjust `rotation` (e.g. 3.14 for 180 deg)
-- "Shrink" / "Vanish" -> `scale`: 0.1
-- "Grow" / "Expand" -> `scale`: 3.0
-- "Gravity" / "Fall" -> YOU MUST use the `apply_gravity` action! Do NOT use `tween_area` for gravity! Do NOT use `draw_text` for gravity!
+CRITICAL INTENTION & PHYSICS INSTRUCTION: You must smartly interpret the user's physical or magical intentions.
+- "Gravity" / "Fall" -> YOU MUST use the `apply_gravity` action! Do NOT use `draw_text` for gravity!
 CRITICAL ANIMATION AMBIGUITY RULE: If the user asks to animate, move, or apply gravity to something, BUT there are multiple distinct objects on the canvas and they did not specify WHICH object, YOU MUST set `decision` to "ask_clarification" and ask them! (e.g. "Which object should I add gravity to? The car or the tree?")
-Use your intelligence to combine these (e.g. floating away while spinning) and set appropriate `duration_ms` (1000-3000ms).
-CRITICAL WARNING: DO NOT BLINDLY COPY THE EXAMPLE JSON! You MUST estimate the actual pixel coordinates [x, y, w, h] of the objects you see in the provided image based on the canvas size!
-You can output MULTIPLE tween_area commands in your JSON array to move different objects simultaneously!
-Example of making two separate circles collide over 2 seconds:
-[
-  {"action": "tween_area", "rect": [50, 100, 40, 40], "dx": 200, "dy": 0, "duration_ms": 2000},
-  {"action": "tween_area", "rect": [400, 100, 40, 40], "dx": -200, "dy": 0, "duration_ms": 2000}
-]
-
 NOTE: YOU HAVE FULL CONTROL OVER COLORS AND SIZES. 
 - Use vibrant hex colors (e.g. "0xFFFF0000" for red) when drawing diagrams or correcting user work.
 - The 'size' parameter controls the line thickness (or font size for text). For standard drawing, use 2.0. If you are asked to "color", "highlight", or draw something strong/bold, increase the size significantly!
@@ -252,22 +256,32 @@ CRITICAL REASONING RULE: Think step-by-step before answering. Do NOT blindly agr
 Remember: NO CHAT TEXT FOR SOLUTIONS. ONLY JSON `draw_text` ACTIONS.
 User prompt: ''';
 
-    final String fullPrompt = systemInstruction + prompt;
+      final String fullPrompt = systemInstruction + prompt;
 
-    try {
       final base64Image = base64Encode(imageBytes);
 
       switch (provider) {
         case AiProvider.gemini:
-          return await _askGemini(base64Image, fullPrompt, apiKey, modelId);
+          return await _askGemini(base64Image, fullPrompt, apiKey, modelId, _activeClient!);
         case AiProvider.chatGpt:
-          return await _askOpenAi(base64Image, fullPrompt, apiKey, modelId);
+          return await _askOpenAi(base64Image, fullPrompt, apiKey, modelId, _activeClient!);
         case AiProvider.claude:
-          return await _askClaude(base64Image, fullPrompt, apiKey, modelId);
+          return await _askClaude(base64Image, fullPrompt, apiKey, modelId, _activeClient!);
       }
     } catch (e) {
-      return "AI Error (${provider.displayName}): $e";
+      debugPrint("AI Service Raw Error (${provider.displayName}): $e");
+      return "AI Error: Network error, please check your connection and try again.";
+    } finally {
+      _isRequestInProgress = false;
+      _activeClient?.close();
+      _activeClient = null;
     }
+  }
+
+  static void cancelRequest() {
+    _isRequestInProgress = false;
+    _activeClient?.close();
+    _activeClient = null;
   }
 
   static Future<String> _askGemini(
@@ -275,6 +289,7 @@ User prompt: ''';
     String prompt,
     String apiKey,
     String modelId,
+    http.Client client,
   ) async {
     final url = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent?key=$apiKey',
@@ -296,7 +311,7 @@ User prompt: ''';
       ],
     };
 
-    final response = await http
+    final response = await client
         .post(
           url,
           headers: {'Content-Type': 'application/json'},
@@ -318,6 +333,7 @@ User prompt: ''';
     String prompt,
     String apiKey,
     String modelId,
+    http.Client client,
   ) async {
     final url = Uri.parse('https://api.openai.com/v1/chat/completions');
 
@@ -340,7 +356,7 @@ User prompt: ''';
       "max_tokens": 1000,
     };
 
-    final response = await http
+    final response = await client
         .post(
           url,
           headers: {
@@ -364,6 +380,7 @@ User prompt: ''';
     String prompt,
     String apiKey,
     String modelId,
+    http.Client client,
   ) async {
     final url = Uri.parse('https://api.anthropic.com/v1/messages');
 
@@ -390,7 +407,7 @@ User prompt: ''';
       ],
     };
 
-    final response = await http
+    final response = await client
         .post(
           url,
           headers: {

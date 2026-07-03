@@ -1,4 +1,4 @@
-import 'dart:ui';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../models/stroke.dart';
 import '../models/tool_type.dart';
@@ -18,29 +18,61 @@ class BackgroundPainter extends CustomPainter {
 
 class DrawingCanvasPainter extends CustomPainter {
   final List<Stroke> strokes;
+  static ui.Picture? _cachedPicture;
+  static int _cachedStrokeCount = -1;
 
   DrawingCanvasPainter({required this.strokes});
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (final stroke in strokes) {
-      if (stroke.points.isEmpty) continue;
+    final viewport = canvas.getLocalClipBounds();
 
-      final isHighlighter = stroke.toolType == ToolType.highlighter;
-      final isEraser = stroke.toolType == ToolType.eraser;
-      final isBrush = stroke.toolType == ToolType.brush;
-      final isFill = stroke.toolType == ToolType.fill;
+    // Cache static strokes (all but the last active stroke)
+    final staticCount = strokes.isNotEmpty ? strokes.length - 1 : 0;
+    
+    if (_cachedStrokeCount != staticCount) {
+      final recorder = ui.PictureRecorder();
+      final cacheCanvas = Canvas(recorder);
+      
+      for (int i = 0; i < staticCount; i++) {
+        _drawStroke(cacheCanvas, strokes[i]);
+      }
+      
+      _cachedPicture = recorder.endRecording();
+      _cachedStrokeCount = staticCount;
+    }
 
-      final paint = Paint()
-        ..color = isHighlighter
-            ? stroke.color.withOpacity(0.4)
-            : (isEraser ? Colors.white : stroke.color)
-        ..strokeWidth = isHighlighter ? stroke.size * 2 : stroke.size
-        ..strokeCap = isHighlighter ? StrokeCap.square : StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..style = (stroke.isFilled || isFill)
-            ? PaintingStyle.fill
-            : PaintingStyle.stroke;
+    if (_cachedPicture != null) {
+      canvas.drawPicture(_cachedPicture!);
+    }
+
+    // Draw active stroke with viewport culling
+    if (strokes.isNotEmpty) {
+      final activeStroke = strokes.last;
+      if (activeStroke.bounds.overlaps(viewport)) {
+        _drawStroke(canvas, activeStroke);
+      }
+    }
+  }
+
+  void _drawStroke(Canvas canvas, Stroke stroke) {
+    if (stroke.points.isEmpty) return;
+
+    final isHighlighter = stroke.toolType == ToolType.highlighter;
+    final isEraser = stroke.toolType == ToolType.eraser;
+    final isBrush = stroke.toolType == ToolType.brush;
+    final isFill = stroke.toolType == ToolType.fill;
+
+    final paint = Paint()
+      ..color = isHighlighter
+          ? stroke.color.withOpacity(0.4)
+          : (isEraser ? Colors.white : stroke.color)
+      ..strokeWidth = isHighlighter ? stroke.size * 2 : stroke.size
+      ..strokeCap = isHighlighter ? StrokeCap.square : StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = (stroke.isFilled || isFill)
+          ? PaintingStyle.fill
+          : PaintingStyle.stroke;
 
       if (isBrush) {
         paint.maskFilter = MaskFilter.blur(BlurStyle.normal, stroke.size / 2);
@@ -48,6 +80,8 @@ class DrawingCanvasPainter extends CustomPainter {
 
       if (isHighlighter) {
         paint.blendMode = BlendMode.multiply;
+      } else if (isEraser) {
+        paint.blendMode = BlendMode.clear;
       }
 
       if (stroke.decodedImage != null) {
@@ -62,13 +96,13 @@ class DrawingCanvasPainter extends CustomPainter {
         }
         canvas.drawImage(stroke.decodedImage!, Offset.zero, imagePaint);
         canvas.restore();
-        continue;
+        return;
       }
 
       if (stroke.toolType == ToolType.latex) {
         // LaTeX is rendered independently via Math.tex in canvas_widget.dart,
         // so we don't paint it here on the raw canvas.
-        continue;
+        return;
       }
 
       if (stroke.text != null &&
@@ -99,16 +133,68 @@ class DrawingCanvasPainter extends CustomPainter {
         textPainter.layout(maxWidth: stroke.size * 30.0); // Wrap based on font size
         textPainter.paint(canvas, Offset.zero);
         canvas.restore();
-        continue;
+        return;
+      }
+
+      if (stroke.toolType == ToolType.portal) {
+        final bounds = stroke.bounds;
+        final center = bounds.center;
+        // Average radius from drawn bounds
+        final radius = (bounds.width + bounds.height) / 4;
+        
+        final portalPaint = Paint()
+          ..color = Colors.cyanAccent.withValues(alpha: 0.8)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4.0;
+        
+        final glowPaint = Paint()
+          ..color = Colors.cyan.withValues(alpha: 0.3)
+          ..style = PaintingStyle.fill
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10.0);
+          
+        canvas.drawCircle(center, radius, glowPaint);
+        canvas.drawCircle(center, radius, portalPaint);
+        return;
+      }
+
+      if (stroke.toolType == ToolType.wire) {
+        final wirePaint = Paint()
+          ..color = stroke.color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke.size + 2.0
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round;
+          
+        final corePaint = Paint()
+          ..color = Colors.white.withValues(alpha: 0.5)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke.size / 2
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round;
+
+        final path = stroke.path;
+        canvas.drawPath(path, wirePaint);
+        canvas.drawPath(path, corePaint);
+
+        if (stroke.points.isNotEmpty) {
+          final nodePaint = Paint()
+            ..color = stroke.color
+            ..style = PaintingStyle.fill;
+          canvas.drawCircle(stroke.points.first, stroke.size * 2, nodePaint);
+          canvas.drawCircle(stroke.points.last, stroke.size * 2, nodePaint);
+        }
+        return;
       }
 
       if (stroke.points.length == 1) {
         // Draw a single dot
-        canvas.drawPoints(PointMode.points, [stroke.points.first], paint);
+        canvas.drawPoints(ui.PointMode.points, [stroke.points.first], paint);
       } else {
         // Draw cached path for massive performance gain
         final path = stroke.path;
-        canvas.drawPath(path, paint);
+        if (!isFill) {
+          canvas.drawPath(path, paint);
+        }
 
         if (stroke.isFilled && stroke.toolType == ToolType.pen) {
           final outlinePaint = Paint()
@@ -118,7 +204,6 @@ class DrawingCanvasPainter extends CustomPainter {
           canvas.drawPath(path, outlinePaint);
         }
       }
-    }
   }
 
   @override

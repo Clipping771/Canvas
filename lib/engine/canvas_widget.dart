@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/drawing_provider.dart';
 import '../models/tool_type.dart';
+import '../models/stroke.dart';
 import 'drawing_painter.dart';
 import 'dart:convert';
 import '../core/event_bus.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'selection_overlay.dart';
 import '../widgets/weather_widget.dart';
+import '../widgets/chemistry_widget.dart';
+import '../services/chemistry_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../engine/cognitive/cognitive_runtime.dart';
 import '../widgets/ai_avatar_widget.dart';
@@ -39,6 +42,23 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
     _marqueeNotifier.dispose();
     transformationController.dispose();
     super.dispose();
+  }
+
+  /// Async-loads a ChemMolecule for a stroke that has `smiles` but no `chemMolecule`.
+  /// Calls notifier to patch the stroke once data is ready.
+  void _ensureMoleculeLoaded(Stroke stroke, DrawingNotifier notifier) {
+    if (stroke.customMetadata?['chem_loading'] == true) return;
+    notifier.updateStrokeById(stroke.id, (s) => s.copyWith(
+      customMetadata: {...(s.customMetadata ?? {}), 'chem_loading': true},
+    ));
+    ChemistryService.fetchMolecule(stroke.smiles!).then((mol) {
+      if (mol != null && mounted) {
+        notifier.updateStrokeById(stroke.id, (s) => s.copyWith(
+          chemMolecule: mol,
+          customMetadata: {...(s.customMetadata ?? {}), 'chem_loading': false},
+        ));
+      }
+    });
   }
 
   @override
@@ -220,6 +240,51 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
                       angle: stroke.rotation,
                       alignment: Alignment.topLeft,
                       child: IgnorePointer(child: content),
+                    ),
+                  );
+                }),
+            // Chemistry Vector Layer — renders SMILES-based molecules natively
+            ...(drawingState.previewTransformedStrokes != null
+                    ? drawingState.strokes.map((s) {
+                        final idx = drawingState.selectedStrokes.indexOf(s);
+                        return idx != -1
+                            ? drawingState.previewTransformedStrokes![idx]
+                            : s;
+                      })
+                    : drawingState.strokes)
+                .where((s) => s.smiles != null && s.points.isNotEmpty)
+                .map<Widget>((stroke) {
+                  final mol = stroke.chemMolecule;
+                  if (mol == null) {
+                    _ensureMoleculeLoaded(stroke, notifier);
+                    return Positioned(
+                      left: stroke.points.first.dx,
+                      top: stroke.points.first.dy,
+                      child: const SizedBox(
+                        width: 300,
+                        height: 260,
+                        child: Center(
+                            child: CircularProgressIndicator(strokeWidth: 1.5)),
+                      ),
+                    );
+                  }
+                  return Positioned(
+                    left: stroke.points.first.dx,
+                    top: stroke.points.first.dy,
+                    child: IgnorePointer(
+                      child: stroke.animationProgress != null &&
+                              stroke.animationProgress! < 1.0
+                          ? ChemistryRevealWidget(
+                              molecule: mol,
+                              animationProgress: stroke.animationProgress!,
+                              width: 300,
+                              height: 260,
+                            )
+                          : ChemistryWidget(
+                              molecule: mol,
+                              width: 300,
+                              height: 260,
+                            ),
                     ),
                   );
                 }),

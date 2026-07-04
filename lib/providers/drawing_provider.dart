@@ -1154,6 +1154,35 @@ class DrawingNotifier extends Notifier<DrawingState> {
           continue;
         }
 
+        // Chemistry strokes — animate the reveal via animationProgress
+        // (ChemistryRevealWidget uses it as a clipRect widthFactor)
+        if (stroke.smiles != null) {
+          state = state.copyWith(
+            strokes: [...state.strokes, stroke.copyWith(animationProgress: 0.0)],
+            undoHistory: newUndoHistory,
+            redoHistory: [],
+          );
+          const int frames = 60; // 1s reveal
+          for (int f = 1; f <= frames; f++) {
+            await Future.delayed(const Duration(milliseconds: 16));
+            final double t = f / frames;
+            final double eased = t < 0.5
+                ? 2 * t * t
+                : 1 - math.pow(-2 * t + 2, 2).toDouble() / 2;
+            final updatedStrokes = List<Stroke>.from(state.strokes);
+            if (updatedStrokes.isNotEmpty) {
+              updatedStrokes.last = stroke.copyWith(animationProgress: eased);
+              state = state.copyWith(strokes: updatedStrokes);
+            }
+          }
+          final finalStrokes = List<Stroke>.from(state.strokes);
+          if (finalStrokes.isNotEmpty) {
+            finalStrokes.last = stroke.copyWith(animationProgress: 1.0);
+            state = state.copyWith(strokes: finalStrokes);
+          }
+          continue;
+        }
+
         if (stroke.imageBytes != null) {
           state = state.copyWith(
             strokes: [

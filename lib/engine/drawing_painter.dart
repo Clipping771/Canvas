@@ -57,6 +57,9 @@ class DrawingCanvasPainter extends CustomPainter {
   void _drawStroke(Canvas canvas, Stroke stroke) {
     if (stroke.points.isEmpty) return;
 
+    // Chemistry strokes are rendered by ChemistryWidget in canvas_widget.dart
+    if (stroke.smiles != null) return;
+
     final isHighlighter = stroke.toolType == ToolType.highlighter;
     final isEraser = stroke.toolType == ToolType.eraser;
     final isBrush = stroke.toolType == ToolType.brush;

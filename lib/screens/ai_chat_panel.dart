@@ -18,6 +18,7 @@ import '../providers/ai_chat_provider.dart';
 import '../services/ai_agent_service.dart';
 import '../services/memory_service.dart';
 import '../services/plantuml_service.dart';
+import '../services/chemistry_service.dart';
 import '../utils/ai_stroke_generator.dart';
 import '../utils/sketch_templates.dart';
 import '../models/spatial_node.dart';
@@ -1420,47 +1421,21 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           if (formula != null && pos != null && pos.length >= 2) {
             final p = targetTopLeft ?? mapPoint(pos[0].toDouble(), pos[1].toDouble());
 
-            // PubChem direct URL — works on native. On web, CORS blocks it so we
-            // fall back to a CORS-anywhere proxy.
-            final encodedFormula = Uri.encodeComponent(formula);
-            final directUrl =
-                'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/$encodedFormula/PNG';
-            final proxyUrl =
-                'https://corsproxy.io/?${Uri.encodeComponent(directUrl)}';
-
-            Uint8List? imageBytes;
-            try {
-              final res = await http.get(Uri.parse(directUrl));
-              if (res.statusCode == 200) {
-                imageBytes = res.bodyBytes;
-              } else {
-                // Try proxy fallback
-                final res2 = await http.get(Uri.parse(proxyUrl));
-                if (res2.statusCode == 200) imageBytes = res2.bodyBytes;
-              }
-            } catch (_) {
-              try {
-                final res2 = await http.get(Uri.parse(proxyUrl));
-                if (res2.statusCode == 200) imageBytes = res2.bodyBytes;
-              } catch (e2) {
-                throw Exception('Chemistry fetch failed: $e2');
-              }
+            // NEW: fetch molecule via ChemistryService (plain JSON/SDF text —
+            // no CORS issues, no raster PNG, no BlendMode hacks).
+            final mol = await ChemistryService.fetchMolecule(formula);
+            if (mol == null) {
+              throw Exception('Could not find molecule data for: $formula');
             }
-
-            if (imageBytes == null || imageBytes.isEmpty) {
-              throw Exception('PubChem returned no data for formula: $formula');
-            }
-
-            final decodedImage = await decodeImageFromList(imageBytes);
             newStrokes.add(
               Stroke(
                 points: [Offset(p.dx, p.dy)],
                 color: color,
                 size: 1.0,
                 toolType: ToolType.pen,
-                imageBytes: imageBytes,
-                decodedImage: decodedImage,
-                text: 'chemistry',
+                smiles: formula, // persisted key for re-fetch after reload
+                chemMolecule: mol, // already loaded — no spinner needed
+                text: 'chemistry', // kept for scene graph semantic tag
               ),
             );
           }

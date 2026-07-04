@@ -649,6 +649,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     }
 
     double? internalSafeY;
+    Offset? lastPlacedPos;
 
     for (var action in actions) {
       if (action is Map) {
@@ -1165,10 +1166,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               action['id'] as String? ??
               DateTime.now().millisecondsSinceEpoch.toString();
 
-          if (pathData != null && pos != null && pos.length >= 2) {
-            double rawX = pos[0].toDouble();
-            double rawY = pos[1].toDouble();
-            final p = mapPoint(rawX, rawY);
+          if (pathData != null) {
+            final p = targetTopLeft ?? (pos != null && pos.length >= 2 ? mapPoint(pos[0].toDouble(), pos[1].toDouble()) : mapPoint(100.0, 100.0));
             final scale = inverse.getMaxScaleOnAxis();
 
             final svgScale = (action['scale'] as num?)?.toDouble() ?? 1.0;
@@ -1217,12 +1216,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           final id =
               action['id'] as String? ??
               DateTime.now().millisecondsSinceEpoch.toString();
-          if (pos == null || pos.length < 2) continue;
 
-          double rawX = pos[0].toDouble();
-          double rawY = pos[1].toDouble();
-
-          final p = mapPoint(rawX, rawY);
+          final p = targetTopLeft ?? (pos != null && pos.length >= 2 ? mapPoint(pos[0].toDouble(), pos[1].toDouble()) : mapPoint(100.0, 100.0));
           final scale = inverse.getMaxScaleOnAxis();
 
           final replaceName = action['replace'] as String?;
@@ -1418,8 +1413,19 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         } else if (type == 'insert_chemistry') {
           final formula = action['formula'] as String?;
           List? pos = action['position'] as List?;
-          if (formula != null && pos != null && pos.length >= 2) {
-            final p = targetTopLeft ?? mapPoint(pos[0].toDouble(), pos[1].toDouble());
+          if (formula != null) {
+            final rawP = targetTopLeft ?? (pos != null && pos.length >= 2 ? mapPoint(pos[0].toDouble(), pos[1].toDouble()) : mapPoint(100.0, 100.0));
+            final scale = inverse.getMaxScaleOnAxis();
+            
+            Offset p = rawP;
+            // Prevent stacking if AI generated multiple items at the exact same coordinate
+            if (lastPlacedPos != null && (p.dx - lastPlacedPos!.dx).abs() < 5 && (p.dy - lastPlacedPos!.dy).abs() < 5) {
+                p = Offset(lastPlacedPos!.dx + 380.0 * scale, lastPlacedPos!.dy);
+                if (p.dx > (targetTopLeft?.dx ?? mapPoint(100.0, 100.0).dx) + 1500.0 * scale) { // wrap to next row
+                   p = Offset(rawP.dx, lastPlacedPos!.dy + 380.0 * scale);
+                }
+            }
+            lastPlacedPos = p;
 
             // NEW: fetch molecule via ChemistryService (plain JSON/SDF text —
             // no CORS issues, no raster PNG, no BlendMode hacks).
@@ -1442,8 +1448,19 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         } else if (type == 'generate_image') {
           final prompt = action['prompt'] as String?;
           List? pos = action['position'] as List?;
-          if (prompt != null && pos != null && pos.length >= 2) {
-            final p = targetTopLeft ?? mapPoint(pos[0].toDouble(), pos[1].toDouble());
+          if (prompt != null) {
+            final rawP = targetTopLeft ?? (pos != null && pos.length >= 2 ? mapPoint(pos[0].toDouble(), pos[1].toDouble()) : mapPoint(100.0, 100.0));
+            final scale = inverse.getMaxScaleOnAxis();
+
+            Offset p = rawP;
+            // Prevent stacking if AI generated multiple items at the exact same coordinate
+            if (lastPlacedPos != null && (p.dx - lastPlacedPos!.dx).abs() < 5 && (p.dy - lastPlacedPos!.dy).abs() < 5) {
+                p = Offset(lastPlacedPos!.dx + 550.0 * scale, lastPlacedPos!.dy);
+                if (p.dx > (targetTopLeft?.dx ?? mapPoint(100.0, 100.0).dx) + 1500.0 * scale) { // wrap to next row
+                   p = Offset(rawP.dx, lastPlacedPos!.dy + 550.0 * scale);
+                }
+            }
+            lastPlacedPos = p;
 
             final seed = DateTime.now().millisecondsSinceEpoch;
             final url =

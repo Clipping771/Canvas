@@ -88,21 +88,12 @@ class ChemistryRevealWidget extends StatelessWidget {
     return SizedBox(
       width: width,
       height: height,
-      child: ClipRect(
-        child: Align(
-          alignment: Alignment.centerLeft,
-          widthFactor: animationProgress.clamp(0.0, 1.0),
-          child: SizedBox(
-            width: width,
-            height: height,
-            child: CustomPaint(
-              painter: _MolPainter(
-                molecule: molecule,
-                strokeColor: strokeColor,
-                strokeWidth: 2.0,
-              ),
-            ),
-          ),
+      child: CustomPaint(
+        painter: _MolPainter(
+          molecule: molecule,
+          strokeColor: strokeColor,
+          strokeWidth: 2.0,
+          animationProgress: animationProgress,
         ),
       ),
     );
@@ -116,11 +107,13 @@ class _MolPainter extends CustomPainter {
   final ChemMolecule molecule;
   final Color strokeColor;
   final double strokeWidth;
+  final double animationProgress;
 
   _MolPainter({
     required this.molecule,
     required this.strokeColor,
     required this.strokeWidth,
+    this.animationProgress = 1.0,
   });
 
   @override
@@ -163,78 +156,97 @@ class _MolPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
-    for (final bond in molecule.bonds) {
+    for (int i = 0; i < molecule.bonds.length; i++) {
+      final bond = molecule.bonds[i];
       if (bond.atomIdx1 >= molecule.atoms.length ||
           bond.atomIdx2 >= molecule.atoms.length) continue;
 
+      // 80% of animation for drawing bonds, 20% for revealing atoms
+      final double startProgress = (i / molecule.bonds.length) * 0.8;
+      final double endProgress = ((i + 1) / molecule.bonds.length) * 0.8;
+      
+      if (animationProgress < startProgress) continue;
+
+      double localProgress = 1.0;
+      if (animationProgress < endProgress) {
+        localProgress = ((animationProgress - startProgress) / (endProgress - startProgress)).clamp(0.0, 1.0);
+      }
+
       final p1 = toScreen(molecule.atoms[bond.atomIdx1]);
       final p2 = toScreen(molecule.atoms[bond.atomIdx2]);
+      final currentP2 = Offset.lerp(p1, p2, localProgress)!;
 
       if (bond.order == 1) {
-        canvas.drawLine(p1, p2, bondPaint);
+        canvas.drawLine(p1, currentP2, bondPaint);
       } else if (bond.order == 2) {
-        _drawDoubleBond(canvas, p1, p2, bondPaint);
+        _drawDoubleBond(canvas, p1, currentP2, bondPaint);
       } else if (bond.order >= 3) {
-        _drawTripleBond(canvas, p1, p2, bondPaint);
+        _drawTripleBond(canvas, p1, currentP2, bondPaint);
       }
     }
 
     // ── 4. Draw atom labels ───────────────────────────────
-    // Skip 'C' (carbon) — structural formula convention
-    for (final atom in molecule.atoms) {
-      if (atom.symbol == 'C') continue; // implicit carbon
-      final pos = toScreen(atom);
-      final color = _colorFor(atom.symbol);
+    final double atomOpacity = ((animationProgress - 0.8) / 0.2).clamp(0.0, 1.0);
 
-      // White background circle to erase bond line under label
-      canvas.drawCircle(
-        pos,
-        8.5,
-        Paint()..color = Colors.white,
-      );
+    if (atomOpacity > 0.0) {
+      // Skip 'C' (carbon) — structural formula convention
+      for (final atom in molecule.atoms) {
+        if (atom.symbol == 'C') continue; // implicit carbon
+        final pos = toScreen(atom);
+        final color = _colorFor(atom.symbol).withOpacity(atomOpacity);
 
-      // Atom symbol
-      final tp = TextPainter(
-        text: TextSpan(
-          text: atom.symbol,
-          style: TextStyle(
-            color: color,
-            fontSize: atom.symbol.length > 1 ? 11 : 13,
-            fontWeight: FontWeight.bold,
+        // White background circle to erase bond line under label
+        canvas.drawCircle(
+          pos,
+          8.5,
+          Paint()..color = Colors.white.withOpacity(atomOpacity),
+        );
+
+        // Atom symbol
+        final tp = TextPainter(
+          text: TextSpan(
+            text: atom.symbol,
+            style: TextStyle(
+              color: color,
+              fontSize: atom.symbol.length > 1 ? 11 : 13,
+              fontWeight: FontWeight.bold,
+            ),
           ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
+          textDirection: TextDirection.ltr,
+        )..layout();
 
-      tp.paint(
-        canvas,
-        Offset(pos.dx - tp.width / 2, pos.dy - tp.height / 2),
-      );
+        tp.paint(
+          canvas,
+          Offset(pos.dx - tp.width / 2, pos.dy - tp.height / 2),
+        );
+      }
     }
 
     // ── 5. Footer: formula + name ─────────────────────────
-    final label = '${molecule.formula}  ·  ${molecule.name}';
-    final footerTp = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: TextStyle(
-          color: strokeColor.withOpacity(0.6),
-          fontSize: 10,
-          fontWeight: FontWeight.w500,
+    if (atomOpacity > 0.0) {
+      final label = '${molecule.formula}  ·  ${molecule.name}';
+      final footerTp = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: TextStyle(
+            color: strokeColor.withOpacity(0.6 * atomOpacity),
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+          ),
         ),
-      ),
-      textDirection: TextDirection.ltr,
-      textAlign: TextAlign.center,
-      maxLines: 1,
-    )..layout(maxWidth: size.width - 16);
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.center,
+        maxLines: 1,
+      )..layout(maxWidth: size.width - 16);
 
-    footerTp.paint(
-      canvas,
-      Offset(
-        (size.width - footerTp.width) / 2,
-        size.height - footerTp.height - 4,
-      ),
-    );
+      footerTp.paint(
+        canvas,
+        Offset(
+          (size.width - footerTp.width) / 2,
+          size.height - footerTp.height - 4,
+        ),
+      );
+    }
   }
 
   void _drawDoubleBond(Canvas canvas, Offset p1, Offset p2, Paint paint) {
@@ -270,5 +282,6 @@ class _MolPainter extends CustomPainter {
   bool shouldRepaint(covariant _MolPainter old) =>
       old.molecule != molecule ||
       old.strokeColor != strokeColor ||
-      old.strokeWidth != strokeWidth;
+      old.strokeWidth != strokeWidth ||
+      old.animationProgress != animationProgress;
 }

@@ -1059,7 +1059,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
         ..add(List.from(state.strokes));
     _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
 
-      if (stroke.text != null && stroke.toolType != ToolType.latex) {
+      if (stroke.text != null && stroke.toolType != ToolType.latex && stroke.toolType != ToolType.widget && stroke.smiles == null) {
         final fullText = stroke.text!;
         _checkEasterEggs(fullText);
 

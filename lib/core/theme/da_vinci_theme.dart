@@ -3,31 +3,31 @@ import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
   // Primary Palette
-  static const Color primary = Color(0xFF6F4E37); // Dark Sepia Brown
-  static const Color primaryDark = Color(0xFF4A3222); // Deep Umber
+  static const Color primary = Color(0xFF757575); // Silver
+  static const Color primaryDark = Color(0xFF424242); // Dark Silver
   
   // Accents
-  static const Color accent = Color(0xFFC9A227); // Antique Gold
-  static const Color accentLight = Color(0xFFE8C766); // Pale Gold
+  static const Color accent = Color(0xFF9E9E9E); // Accent Silver
+  static const Color accentLight = Color(0xFFE0E0E0); // Pale Silver
   
   // Backgrounds & Surfaces
-  static const Color background = Color(0xFFF4ECD8); // Parchment/Ivory
-  static const Color backgroundAlt = Color(0xFFEFE6D0); // Aged Parchment
-  static const Color surface = Color(0xFFFBF7ED); // Warm White
+  static const Color background = Color(0xFFFFFFFF); // Pure White
+  static const Color backgroundAlt = Color(0xFFF5F5F5); // Silver White
+  static const Color surface = Color(0xFFFFFFFF); // Pure White
   
   // Text
-  static const Color textPrimary = Color(0xFF2B2015); // Ink Black-Brown
-  static const Color textSecondary = Color(0xFF6B5D4F); // Faded Ink
+  static const Color textPrimary = Color(0xFF212121); // Dark Gray
+  static const Color textSecondary = Color(0xFF757575); // Gray
   
   // System
-  static const Color divider = Color(0x66C9A227); // Brass Line (~40% opacity of Gold)
+  static const Color divider = Color(0xFFE0E0E0); // Silver Line
   static const Color error = Color(0xFFA13D2E); // Wax Red
   static const Color success = Color(0xFF5C7A5A); // Verdigris Green
   
   // Dark Mode specific
-  static const Color darkBackground = Color(0xFF1C1712); // Ink-well black-brown
-  static const Color darkSurface = Color(0xFF28211A);
-  static const Color darkTextSecondary = Color(0xFFA69880);
+  static const Color darkBackground = Color(0xFF121212); // Dark
+  static const Color darkSurface = Color(0xFF1E1E1E);
+  static const Color darkTextSecondary = Color(0xFF9E9E9E);
 }
 
 class DaVinciTheme {
@@ -70,7 +70,7 @@ class DaVinciTheme {
       cardTheme: CardThemeData(
         color: AppColors.backgroundAlt,
         elevation: 2,
-        shadowColor: Colors.brown.shade900.withOpacity(0.15),
+        shadowColor: Colors.grey.shade900.withOpacity(0.15),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -86,7 +86,7 @@ class DaVinciTheme {
   // A helper for the warm shadow used across the app
   static List<BoxShadow> get warmShadow => [
     BoxShadow(
-      color: Colors.brown.shade900.withOpacity(0.15),
+      color: Colors.grey.shade900.withOpacity(0.15),
       blurRadius: 6,
       offset: const Offset(0, 2),
     )

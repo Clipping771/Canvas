@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class AiChatState {
-  final List<Map<String, String>> messages;
+  final List<Map<String, dynamic>> messages;
   AiChatState({required this.messages});
 }
 
@@ -19,7 +19,7 @@ class AiChatNotifier extends Notifier<AiChatState> {
     );
   }
 
-  void addMessage(Map<String, String> message) {
+  void addMessage(Map<String, dynamic> message) {
     state = AiChatState(messages: [...state.messages, message]);
   }
 

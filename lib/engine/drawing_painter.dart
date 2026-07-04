@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../models/stroke.dart';
 import '../models/tool_type.dart';
+import 'dart:convert';
 import 'package:google_fonts/google_fonts.dart';
 
 class BackgroundPainter extends CustomPainter {
@@ -18,26 +19,25 @@ class BackgroundPainter extends CustomPainter {
 
 class DrawingCanvasPainter extends CustomPainter {
   final List<Stroke> strokes;
-  static ui.Picture? _cachedPicture;
-  static int _cachedStrokeCount = -1;
+  // Instance-level cache — NOT static, so each page gets its own cache
+  ui.Picture? _cachedPicture;
+  int _cachedStrokeCount = -1;
 
   DrawingCanvasPainter({required this.strokes});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final viewport = canvas.getLocalClipBounds();
-
     // Cache static strokes (all but the last active stroke)
     final staticCount = strokes.isNotEmpty ? strokes.length - 1 : 0;
-    
+
     if (_cachedStrokeCount != staticCount) {
       final recorder = ui.PictureRecorder();
       final cacheCanvas = Canvas(recorder);
-      
+
       for (int i = 0; i < staticCount; i++) {
         _drawStroke(cacheCanvas, strokes[i]);
       }
-      
+
       _cachedPicture = recorder.endRecording();
       _cachedStrokeCount = staticCount;
     }
@@ -46,12 +46,11 @@ class DrawingCanvasPainter extends CustomPainter {
       canvas.drawPicture(_cachedPicture!);
     }
 
-    // Draw active stroke with viewport culling
+    // Always draw the active (last) stroke — no viewport culling here.
+    // Culling a zero-size rect (e.g. first animation frame with 1 point) would
+    // incorrectly skip the stroke and make animation appear broken.
     if (strokes.isNotEmpty) {
-      final activeStroke = strokes.last;
-      if (activeStroke.bounds.overlaps(viewport)) {
-        _drawStroke(canvas, activeStroke);
-      }
+      _drawStroke(canvas, strokes.last);
     }
   }
 
@@ -127,8 +126,47 @@ class DrawingCanvasPainter extends CustomPainter {
         return;
       }
 
+      if (stroke.toolType == ToolType.widget && stroke.text != null) {
+        try {
+          final data = jsonDecode(stroke.text!);
+          if (data['action'] == 'insert_widget' && data['type'] == 'weather') {
+            final loc = data['location'] ?? 'Unknown';
+            final temp = data['temp'] ?? '--';
+            final cond = data['condition'] ?? 'Clear';
+            final p = stroke.points.isNotEmpty ? stroke.points.first : Offset.zero;
+
+            final cardRect = Rect.fromLTWH(p.dx, p.dy, 250, 120);
+            final cardPaint = Paint()
+              ..color = Colors.blueGrey.shade800
+              ..style = PaintingStyle.fill
+              ..maskFilter = const MaskFilter.blur(BlurStyle.solid, 4);
+
+            canvas.drawRRect(RRect.fromRectAndRadius(cardRect, const Radius.circular(16)), cardPaint);
+
+            final tpLoc = TextPainter(
+              text: TextSpan(text: "$loc", style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+              textDirection: TextDirection.ltr,
+            )..layout();
+            tpLoc.paint(canvas, Offset(p.dx + 20, p.dy + 20));
+
+            final tpTemp = TextPainter(
+              text: TextSpan(text: "$temp", style: const TextStyle(color: Colors.cyanAccent, fontSize: 36, fontWeight: FontWeight.bold)),
+              textDirection: TextDirection.ltr,
+            )..layout();
+            tpTemp.paint(canvas, Offset(p.dx + 20, p.dy + 55));
+
+            final tpCond = TextPainter(
+              text: TextSpan(text: "$cond", style: const TextStyle(color: Colors.white70, fontSize: 20)),
+              textDirection: TextDirection.ltr,
+            )..layout();
+            tpCond.paint(canvas, Offset(p.dx + 120, p.dy + 65));
+            return;
+          }
+        } catch (_) {}
+      }
+
       if (stroke.text != null &&
-          !stroke.text!.startsWith('{"type":"template"')) {
+          !stroke.text!.startsWith('{"type":"template"') && stroke.toolType != ToolType.widget) {
         canvas.save();
         canvas.translate(stroke.points.first.dx, stroke.points.first.dy);
         if (stroke.rotation != 0.0) {

@@ -101,7 +101,7 @@ class MultiIntentRouter {
       }
     } catch (e) {
       EventBus().publish(EventType.systemError, {'error': e.toString(), 'action': intent.actionName});
-      debugPrint("Engine Error: \$e");
+      debugPrint("Engine Error: $e");
     }
   }
 }

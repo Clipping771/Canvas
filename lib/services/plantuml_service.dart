@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class PlantUmlService {
@@ -61,10 +62,10 @@ mindmapDiagram {
       if (response.statusCode == 200) {
         return response.bodyBytes;
       } else {
-        print('Kroki returned error: \${response.statusCode}');
+        debugPrint('Kroki returned error: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching UML image: $e');
+      debugPrint('Error fetching UML image: $e');
     }
     return null;
   }

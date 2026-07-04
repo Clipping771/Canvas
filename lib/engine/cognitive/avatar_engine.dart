@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'task_scheduler.dart';
@@ -51,23 +52,22 @@ class AvatarEngine implements CognitiveSubsystem {
 
   @override
   void onTick(Duration elapsed) {
-    // Simple interpolation towards target
+    // Simple linear interpolation towards target
     if (position.value != _targetPosition) {
       double dx = _targetPosition.dx - position.value.dx;
       double dy = _targetPosition.dy - position.value.dy;
-      double dist = (dx * dx + dy * dy);
-      
-      if (dist < _speed * _speed) {
+      double distSq = dx * dx + dy * dy;
+      double dist = math.sqrt(distSq);
+
+      if (dist < _speed) {
         position.value = _targetPosition;
         if (state.value == AvatarState.moving) {
           state.value = AvatarState.idle;
         }
       } else {
-        double factor = _speed / dist;
-        // Basic linear move for now, later we can add pathfinding to avoid strokes
         position.value = Offset(
-          position.value.dx + dx * factor,
-          position.value.dy + dy * factor,
+          position.value.dx + (dx / dist) * _speed,
+          position.value.dy + (dy / dist) * _speed,
         );
       }
     }

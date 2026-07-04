@@ -41,7 +41,7 @@ class SettingsState {
 }
 
 class SettingsNotifier extends Notifier<SettingsState> {
-  late SharedPreferences _prefs;
+  SharedPreferences? _prefs;
 
   @override
   SettingsState build() {
@@ -49,28 +49,33 @@ class SettingsNotifier extends Notifier<SettingsState> {
     return SettingsState();
   }
 
+  Future<SharedPreferences> _getPrefs() async {
+    _prefs ??= await SharedPreferences.getInstance();
+    return _prefs!;
+  }
+
   Future<void> _loadSettings() async {
-    _prefs = await SharedPreferences.getInstance();
+    final prefs = await _getPrefs();
 
     final Map<AiProvider, String> keys = {};
     for (var provider in AiProvider.values) {
-      final key = _prefs.getString('api_key_${provider.name}');
+      final key = prefs.getString('api_key_${provider.name}');
       if (key != null && key.isNotEmpty) {
         keys[provider] = key;
       }
     }
 
     final savedProviderName =
-        _prefs.getString('selected_provider') ?? AiProvider.gemini.name;
+        prefs.getString('selected_provider') ?? AiProvider.gemini.name;
     final savedProvider = AiProvider.values.firstWhere(
       (p) => p.name == savedProviderName,
       orElse: () => AiProvider.gemini,
     );
 
-    final savedModel = _prefs.getString('selected_model') ?? 'gemini-2.5-pro';
-    final savedFont = _prefs.getString('selected_font') ?? 'Inter';
-    final savedResponseFormat = _prefs.getString('response_format') ?? 'Default';
-    final savedShortcuts = _prefs.getBool('enable_shortcuts') ?? true;
+    final savedModel = prefs.getString('selected_model') ?? 'gemini-2.5-pro';
+    final savedFont = prefs.getString('selected_font') ?? 'Inter';
+    final savedResponseFormat = prefs.getString('response_format') ?? 'Default';
+    final savedShortcuts = prefs.getBool('enable_shortcuts') ?? true;
 
     state = state.copyWith(
       apiKeys: keys,
@@ -83,7 +88,8 @@ class SettingsNotifier extends Notifier<SettingsState> {
   }
 
   Future<void> saveApiKey(AiProvider provider, String key) async {
-    await _prefs.setString('api_key_${provider.name}', key);
+    final prefs = await _getPrefs();
+    await prefs.setString('api_key_${provider.name}', key);
 
     final newKeys = Map<AiProvider, String>.from(state.apiKeys);
     if (key.isEmpty) {
@@ -96,27 +102,32 @@ class SettingsNotifier extends Notifier<SettingsState> {
   }
 
   Future<void> setProvider(AiProvider provider) async {
-    await _prefs.setString('selected_provider', provider.name);
+    final prefs = await _getPrefs();
+    await prefs.setString('selected_provider', provider.name);
     state = state.copyWith(selectedProvider: provider);
   }
 
   Future<void> setModel(String modelId) async {
-    await _prefs.setString('selected_model', modelId);
+    final prefs = await _getPrefs();
+    await prefs.setString('selected_model', modelId);
     state = state.copyWith(selectedModel: modelId);
   }
 
   Future<void> setFont(String fontName) async {
-    await _prefs.setString('selected_font', fontName);
+    final prefs = await _getPrefs();
+    await prefs.setString('selected_font', fontName);
     state = state.copyWith(selectedFont: fontName);
   }
 
   Future<void> setResponseFormat(String format) async {
-    await _prefs.setString('response_format', format);
+    final prefs = await _getPrefs();
+    await prefs.setString('response_format', format);
     state = state.copyWith(responseFormat: format);
   }
 
   Future<void> setEnableKeyboardShortcuts(bool enable) async {
-    await _prefs.setBool('enable_shortcuts', enable);
+    final prefs = await _getPrefs();
+    await prefs.setBool('enable_shortcuts', enable);
     state = state.copyWith(enableKeyboardShortcuts: enable);
   }
 

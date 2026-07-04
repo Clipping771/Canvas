@@ -1,12 +1,13 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'dart:ui';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pasteboard/pasteboard.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_drawing/path_drawing.dart';
 import '../engine/canvas_exporter.dart';
 import '../models/stroke.dart';
@@ -19,8 +20,6 @@ import '../services/memory_service.dart';
 import '../services/plantuml_service.dart';
 import '../utils/ai_stroke_generator.dart';
 import '../utils/sketch_templates.dart';
-import '../models/stroke.dart';
-import '../models/tool_type.dart';
 import '../models/spatial_node.dart';
 import '../engine/weight_controller.dart';
 import '../engine/semantic_camera.dart';
@@ -53,6 +52,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
   bool _cancelRequested = false;
   AiTutorMode _selectedTutorMode = AiTutorMode.normal;
   Completer<String>? _cancelCompleter;
+  Uint8List? _attachedImage;
 
   StreamSubscription? _cancelSub;
 
@@ -106,13 +106,23 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
     }
 
     final text = _textController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty && _attachedImage == null) return;
 
     final chatNotifier = ref.read(aiChatProvider.notifier);
     final drawingNotifier = ref.read(drawingProvider.notifier);
 
     _textController.clear();
-    chatNotifier.addMessage({'sender': 'user', 'text': text});
+    
+    final currentAttachedImage = _attachedImage;
+    setState(() {
+      _attachedImage = null;
+    });
+
+    chatNotifier.addMessage({
+      'sender': 'user', 
+      'text': text,
+      if (currentAttachedImage != null) 'image': currentAttachedImage,
+    });
     _scrollToBottom();
     
     _cancelCompleter = Completer<String>();
@@ -191,10 +201,6 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       Offset? targetTopLeft;
       
       if (minX != double.infinity) {
-        final scaledMinX = (minX * pixelRatio).toInt();
-        final scaledMinY = (minY * pixelRatio).toInt();
-        final scaledMaxX = (maxX * pixelRatio).toInt();
-        final scaledMaxY = (maxY * pixelRatio).toInt();
 
         // --- COGNITIVE SPATIAL OS: Layout Intelligence Layer ---
         final spatialRegistry = ref.read(spatialRegistryProvider.notifier);
@@ -214,7 +220,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         
         final parentBounds = parentId != null ? spatialRegistry.getParentBounds(parentId) : null;
             
-        final optimalOffset = spatialRegistry.state.layoutEngine.computeOptimalPlacement(
+        final optimalOffset = ref.read(spatialRegistryProvider).layoutEngine.computeOptimalPlacement(
           nodeSize: const Size(400, 400), // Estimated generation size
           parentBounds: parentBounds,
           viewportBounds: viewportRect,
@@ -382,16 +388,26 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       }
 
       final chatHistory = ref.read(aiChatProvider).messages;
-      final currentSettings = ref.read(settingsProvider);
+      // currentSettings already read above as `settings` — no need to re-read
       
       final response = await Future.any([
         AiAgentService.askAgent(
           imageBytes: imageBytes ?? [],
+          attachedImageBytes: currentAttachedImage,
           prompt: augmentedPrompt,
           provider: provider,
           apiKey: apiKey,
           modelId: modelId,
-          chatHistory: chatHistory,
+          chatHistory: chatHistory.map((m) {
+            // Skip the 'image' key — Uint8List.toString() produces a useless
+            // number-array string that wastes tokens. The canvas screenshot
+            // already captures all visible content.
+            return Map.fromEntries(
+              m.entries
+                  .where((e) => e.key != 'image')
+                  .map((e) => MapEntry<String, String>(e.key, e.value.toString())),
+            );
+          }).toList(),
           canvasObjects: canvasObjects,
           baseAmbiguityScore: baseAmbiguityScore,
           tutorMode: _selectedTutorMode,
@@ -399,14 +415,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         _cancelCompleter!.future,
       ]);
 
-      try {
-        File('c:/My World/gravity/notesketch_pro/ai_response_debug.log').writeAsStringSync(
-          '=== NEW RESPONSE ===\n$response\n\n',
-          mode: FileMode.append,
-        );
-      } catch (e) {
-        print("Failed to write debug log: $e");
-      }
+      // Debug logging removed — was using a hardcoded developer path that would
+      // crash on any other machine. Use debugPrint for safe cross-platform logging.
+      debugPrint("=== AI RESPONSE ===\n$response");
 
       if (response == "Cancelled by user" || _cancelRequested) {
         throw Exception("Cancelled by user");
@@ -455,9 +466,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           throw Exception("Cancelled by user");
         }
 
-        final startDelay = math.Random().nextInt(300) + 100;
-
-          final data = jsonDecode(jsonStr);
+        final data = jsonDecode(jsonStr);
 
           List actions = [];
           String? aiMessage;
@@ -482,7 +491,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                  // If the final score is > 0.7, enforce Clarification Gate
                  if (llmScore > 0.7 || (data.containsKey('step_0_ambiguity_gate') && data['step_0_ambiguity_gate']['decision'] == 'ask_clarification')) {
                     if (actions.isNotEmpty) {
-                       print("Client-Side Gate: Ops rejected due to high ambiguity score.");
+          debugPrint("Client-Side Gate: Ops rejected due to high ambiguity score.");
                        actions.clear();
                        // Observable Enforcement: Inject a system message to correct state sync
                        chatNotifier.addMessage({'sender': 'ai', 'text': '[System: Ops blocked by ambiguity gate. The AI generated actions but they were rejected for being too ambiguous without clarification.]'});
@@ -493,18 +502,17 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           } else if (data is List) {
             actions = List.from(data);
           }
-
           // Force all conversational AI responses to be drawn on canvas instead of chat UI
           final textToDraw = (aiMessage != null && aiMessage.trim().isNotEmpty) ? aiMessage.trim() : rationaleText?.trim();
           
           if (actions.isEmpty && textToDraw != null && textToDraw.isNotEmpty) {
-            final viewportTarget = MatrixUtils.transformPoint(transform, canvasTargetCenter!);
+            Offset? targetCanvasPos = canvasTargetCenter;
             actions.add({
               "action": "draw_text",
               "text": textToDraw,
               "position": [
-                viewportTarget.dx - 150.0,
-                viewportTarget.dy,
+                targetCanvasPos?.dx ?? 100.0,
+                targetCanvasPos?.dy ?? 100.0,
               ],
               "color": "0xFF000000",
               "size": 18.0,
@@ -527,12 +535,11 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             // For now, executing through legacy block with Safe Mode wrapper.
             diffSummary = await _executeAiActions(actions, targetTopLeft: targetTopLeft);
             
-            if (diffSummary == null || diffSummary.isEmpty) {
-               // Normal empty ops behavior, handled gracefully
+            if (diffSummary.isEmpty) {
                diffSummary = "";
             }
           } catch (engineError) {
-             print("Engine Error during execution: $engineError");
+          debugPrint("Engine Error during execution: $engineError");
              // --- Safe Mode Fallback ---
              chatNotifier.addMessage({
                'sender': 'system', 
@@ -550,7 +557,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             // displayText += "(AI: $rationaleText)";
           }
         } catch (e) {
-          print("Failed to decode AI JSON: $e");
+          debugPrint("Failed to decode AI JSON: $e");
           
           final isJsonAttempt = response.trim().startsWith('{') || response.trim().startsWith('```');
           String textToDraw = response.trim();
@@ -572,14 +579,12 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           final inverse = Matrix4.copy(transform)..invert();
           final catchTargetCenter = MatrixUtils.transformPoint(inverse, Offset(screenSize.width / 2.0, screenSize.height / 2.0));
           
-          final viewportTarget = MatrixUtils.transformPoint(transform, catchTargetCenter);
-
           List actions = [{
             "action": "draw_text",
             "text": textToDraw,
             "position": [
-              viewportTarget.dx - 150.0,
-              viewportTarget.dy,
+              catchTargetCenter.dx,
+              catchTargetCenter.dy,
             ],
             "color": "0xFF000000",
             "size": 18.0,
@@ -646,8 +651,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
     for (var action in actions) {
       if (action is Map) {
-        final type = action['action'];
+        final type = action['action'] ?? action['type'] ?? 'unknown';
 
+        try {
         if (type == 'clear_canvas') {
           drawingNotifier.clear();
           objectsUpdated++; // Prevent fallback
@@ -732,7 +738,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             );
           }
           continue;
-        } else if (type == 'delete_area') {
+        } else if (type == 'delete_area' || type == 'erase_rect') {
           final rectData = action['rect'] as List?;
           if (rectData != null && rectData.length >= 4) {
             final p1 = mapPoint(
@@ -789,17 +795,12 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           if (umlStr != null) {
             double rawX = 100.0, rawY = 100.0;
             if (targetTopLeft != null) {
-              // ALWAYS use targetTopLeft for new generated diagrams!
               rawX = targetTopLeft.dx;
               rawY = targetTopLeft.dy;
             } else if (posData != null && posData.length >= 2) {
               rawX = posData[0].toDouble();
               rawY = posData[1].toDouble();
             }
-            // If targetTopLeft is used, it's already in canvas coords, but wait: 
-            // In other places we mapPoint targetTopLeft? No, targetTopLeft is passed from canvasTargetCenter which is already inverse mapped.
-            // Wait, actually mapPoint(targetTopLeft.dx, targetTopLeft.dy) would double-inverse it!
-            // Let's just use it directly.
             final p = targetTopLeft != null 
                 ? targetTopLeft 
                 : mapPoint(rawX, rawY);
@@ -818,8 +819,10 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                   decodedImage: decodedImage,
                 ));
               } catch (e) {
-                print("Failed to decode UML image: $e");
+                throw Exception("Failed to decode UML image: $e");
               }
+            } else {
+              throw Exception("Failed to fetch UML image from PlantUML API.");
             }
           }
           continue;
@@ -857,7 +860,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                 ? targetTopLeft 
                 : mapPoint(rawX, rawY);
 
-            final existingWidgets = drawingNotifier.state.strokes.where((s) {
+            final existingWidgets = ref.read(drawingProvider).strokes.where((s) {
               if (s.toolType != ToolType.widget || s.text == null) return false;
               try {
                 final j = jsonDecode(s.text!);
@@ -957,6 +960,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             size = (double.tryParse(rawSize) ?? 16.0) / 2.0;
           }
         } catch (_) {}
+        final scale = inverse.getMaxScaleOnAxis();
+        size = size * scale; // Adjust line thickness relative to canvas zoom
         final shapeFilled = (action['isFilled'] ?? action['filled']) as bool? ?? false;
         if (type == 'draw_rect') {
           final rectData = action['rect'] as List?;
@@ -981,7 +986,6 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           final center = action['center'] as List?;
           if (center == null || center.length < 2) continue;
           final p = mapPoint(center[0].toDouble(), center[1].toDouble());
-          final scale = inverse.getMaxScaleOnAxis();
           final radius = ((action['radius'] as num).toDouble() / 2.0) * scale;
           newStrokes.add(
             AiStrokeGenerator.generateCircle(p.dx, p.dy, radius, color, size, isFilled: shapeFilled),
@@ -1202,7 +1206,8 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                 await Future.delayed(Duration.zero);
               }
             } catch (e) {
-              print("WARNING: Failed to parse SVG path: $e");
+          debugPrint("WARNING: Failed to parse SVG path: $e");
+              rethrow; // Rethrow so the global operation error handler catches it
             }
           }
         } else if (type == 'draw_template') {
@@ -1323,7 +1328,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           final linesCount = text.split('\n').length;
           internalSafeY = rawY + (linesCount * 70) + 50;
 
-          final p = mapPoint(rawX, rawY);
+          final p = targetTopLeft ?? mapPoint(rawX, rawY);
           final scale = inverse.getMaxScaleOnAxis();
 
           final currentStrokes = ref.read(drawingProvider).strokes;
@@ -1384,83 +1389,124 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               (size * scale) * 3.0,
             ),
           );
+        } else if (type == 'draw_wire') {
+          final start = action['start'] as List?;
+          final end = action['end'] as List?;
+          if (start != null && end != null && start.length >= 2 && end.length >= 2) {
+            final p1 = mapPoint(start[0].toDouble(), start[1].toDouble());
+            final p2 = mapPoint(end[0].toDouble(), end[1].toDouble());
+            newStrokes.add(Stroke(
+              points: [p1, p2],
+              color: color,
+              size: size * scale,
+              toolType: ToolType.wire,
+            ));
+          }
+        } else if (type == 'draw_portal') {
+          final pos = action['position'] as List?;
+          final r = (action['radius'] as num?)?.toDouble() ?? 40.0;
+          if (pos != null && pos.length >= 2) {
+            final p = mapPoint(pos[0].toDouble(), pos[1].toDouble());
+            newStrokes.add(Stroke(
+              points: [p, Offset(p.dx + r*2, p.dy + r*2)],
+              color: color,
+              size: size * scale,
+              toolType: ToolType.portal,
+            ));
+          }
         } else if (type == 'insert_chemistry') {
           final formula = action['formula'] as String?;
           List? pos = action['position'] as List?;
           if (formula != null && pos != null && pos.length >= 2) {
-            double rawX = pos[0].toDouble();
-            double rawY = pos[1].toDouble();
-            final p = mapPoint(rawX, rawY);
-            
-            final url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${Uri.encodeComponent(formula)}/PNG';
-            
+            final p = targetTopLeft ?? mapPoint(pos[0].toDouble(), pos[1].toDouble());
+
+            // PubChem direct URL — works on native. On web, CORS blocks it so we
+            // fall back to a CORS-anywhere proxy.
+            final encodedFormula = Uri.encodeComponent(formula);
+            final directUrl =
+                'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/$encodedFormula/PNG';
+            final proxyUrl =
+                'https://corsproxy.io/?${Uri.encodeComponent(directUrl)}';
+
+            Uint8List? imageBytes;
             try {
-              final response = await http.get(Uri.parse(url));
-              if (response.statusCode == 200) {
-                final imageBytes = response.bodyBytes;
-                final codec = await instantiateImageCodec(imageBytes);
-                final frameInfo = await codec.getNextFrame();
-                final decodedImage = frameInfo.image;
-                
-                newStrokes.add(
-                  Stroke(
-                    points: [Offset(p.dx, p.dy)],
-                    color: color,
-                    size: 2.0,
-                    toolType: ToolType.pen,
-                    imageBytes: imageBytes,
-                    decodedImage: decodedImage,
-                    text: 'chemistry',
-                  ),
-                );
+              final res = await http.get(Uri.parse(directUrl));
+              if (res.statusCode == 200) {
+                imageBytes = res.bodyBytes;
               } else {
-                print("WARNING: PubChem API failed with status \${response.statusCode}");
+                // Try proxy fallback
+                final res2 = await http.get(Uri.parse(proxyUrl));
+                if (res2.statusCode == 200) imageBytes = res2.bodyBytes;
               }
-            } catch (e) {
-              print("WARNING: Failed to fetch chemistry image: \$e");
+            } catch (_) {
+              try {
+                final res2 = await http.get(Uri.parse(proxyUrl));
+                if (res2.statusCode == 200) imageBytes = res2.bodyBytes;
+              } catch (e2) {
+                throw Exception('Chemistry fetch failed: $e2');
+              }
             }
+
+            if (imageBytes == null || imageBytes.isEmpty) {
+              throw Exception('PubChem returned no data for formula: $formula');
+            }
+
+            final decodedImage = await decodeImageFromList(imageBytes);
+            newStrokes.add(
+              Stroke(
+                points: [Offset(p.dx, p.dy)],
+                color: color,
+                size: 1.0,
+                toolType: ToolType.pen,
+                imageBytes: imageBytes,
+                decodedImage: decodedImage,
+                text: 'chemistry',
+              ),
+            );
           }
         } else if (type == 'generate_image') {
           final prompt = action['prompt'] as String?;
           List? pos = action['position'] as List?;
           if (prompt != null && pos != null && pos.length >= 2) {
-            double rawX = pos[0].toDouble();
-            double rawY = pos[1].toDouble();
-            final p = mapPoint(rawX, rawY);
-            
+            final p = targetTopLeft ?? mapPoint(pos[0].toDouble(), pos[1].toDouble());
+
             final seed = DateTime.now().millisecondsSinceEpoch;
-            
-            // Using the deployed Vercel proxy to bypass Cloudflare Bot Protection on Web
-            final url = 'https://vinciboard-alpha.vercel.app/api/image?prompt=${Uri.encodeComponent(prompt)}&seed=$seed&width=512&height=512';
-            
-            try {
-              final response = await http.get(Uri.parse(url));
-              if (response.statusCode == 200) {
-                final imageBytes = response.bodyBytes;
-                final codec = await instantiateImageCodec(imageBytes);
-                final frameInfo = await codec.getNextFrame();
-                final decodedImage = frameInfo.image;
-                
-                newStrokes.add(
-                  Stroke(
-                    points: [Offset(p.dx, p.dy)],
-                    color: color,
-                    size: 1.0,
-                    toolType: ToolType.pen,
-                    imageBytes: imageBytes,
-                    decodedImage: decodedImage,
-                  ),
-                );
-              } else {
-                print("WARNING: Pollinations API failed with status ${response.statusCode}");
-              }
-            } catch (e) {
-              print("WARNING: Failed to fetch generated image: $e");
+            final url =
+                'https://vinciboard-alpha.vercel.app/api/image?prompt=${Uri.encodeComponent(prompt)}&seed=$seed&width=512&height=512';
+
+            final response = await http.get(Uri.parse(url));
+            if (response.statusCode != 200) {
+              throw Exception('Image generation failed: ${response.statusCode}');
             }
+            final imageBytes = response.bodyBytes;
+            final decodedImage = await decodeImageFromList(imageBytes);
+            newStrokes.add(
+              Stroke(
+                points: [Offset(p.dx, p.dy)],
+                color: color,
+                size: 1.0,
+                toolType: ToolType.pen,
+                imageBytes: imageBytes,
+                decodedImage: decodedImage,
+              ),
+            );
           }
         } else {
-          print("WARNING: Unrecognized AI action type: $type");
-          if (type != null) unrecognized.add(type.toString());
+          debugPrint("WARNING: Unrecognized AI action type: $type");
+          unrecognized.add(type.toString());
+        }
+        } catch (e, st) {
+          debugPrint("CRITICAL ERROR executing action '$type': $e\n$st");
+          final p = targetTopLeft ?? mapPoint(100.0, (internalSafeY ?? 100.0) + 100.0);
+          newStrokes.add(Stroke(
+            points: [p],
+            color: Colors.red,
+            size: 1.0,
+            toolType: ToolType.pen,
+            text: "🚨 FAILED: $type\nError: $e",
+          ));
+          // Advance safeY so next fallback stroke doesn't overlap this one
+          internalSafeY = (internalSafeY ?? 100.0) + 150.0;
         }
       }
     }
@@ -1569,11 +1615,18 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         spatialRegistry.registerNode(node);
         
         // --- COGNITIVE SPATIAL OS: Camera Perception ---
-        EventBus().publish(EventType.aiTaskCompleted, {'intent': CameraIntent.hardFocus});
+        final isRoot = parentId == null;
+        final intent = SemanticCameraIntelligence.determineIntent(
+          userState: UserIntentState.follow, // User waiting for AI
+          nodeDepth: node.depth,
+          isRoot: isRoot,
+          isFullyOffscreen: true, // We assume true for new AI generations to trigger softGuide
+        );
+        EventBus().publish(EventType.aiTaskCompleted, {'intent': intent});
       }
     } else if (objectsAdded > 0 || objectsUpdated > 0) {
        // Also focus if we inserted widgets or images directly
-       EventBus().publish(EventType.aiTaskCompleted, {'intent': CameraIntent.hardFocus});
+       EventBus().publish(EventType.aiTaskCompleted, {'intent': CameraIntent.userAssistedFocus});
     }
 
     if (newStrokes.isNotEmpty || objectsAdded > 0) {
@@ -1764,13 +1817,31 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                               16,
                             ).copyWith(bottomRight: Radius.zero),
                           ),
-                          child: Text(
-                            msg['text']!,
-                            style: const TextStyle(
-                              color: Colors.black87,
-                              fontSize: 15,
-                              height: 1.4,
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if (msg['image'] != null && msg['image'] is Uint8List)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8.0),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.memory(
+                                      msg['image'] as Uint8List,
+                                      width: 150,
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                ),
+                              if (msg['text']?.toString().isNotEmpty ?? false)
+                                Text(
+                                  msg['text']!.toString(),
+                                  style: const TextStyle(
+                                    color: Colors.black87,
+                                    fontSize: 15,
+                                    height: 1.4,
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       );
@@ -1830,52 +1901,115 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                     top: BorderSide(color: Colors.grey.withOpacity(0.15)),
                   ),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF4F4F5),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Focus(
-                          onKeyEvent: (node, event) {
-                            if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
-                              final isShift = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
-                                              HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
-                              if (!isShift) {
-                                // Defer the submit slightly to allow Focus to consume the event fully
-                                Future.microtask(_sendMessage);
-                                return KeyEventResult.handled;
-                              }
-                            }
-                            return KeyEventResult.ignored;
-                          },
-                          child: TextField(
-                            controller: _textController,
-                          minLines: 1,
-                          maxLines: 5,
-                          textInputAction: TextInputAction.newline,
-                          decoration: InputDecoration(
-                            hintText: 'Ask Vinci to do something',
-                            hintStyle: const TextStyle(color: Colors.black54),
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            suffixIcon: _textController.text.isNotEmpty
-                                ? IconButton(
-                                    icon: const Icon(Icons.close, size: 18, color: Colors.black54),
-                                    onPressed: () {
-                                      _textController.clear();
-                                      setState(() {});
+                    if (_attachedImage != null)
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            height: 60,
+                            width: 60,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              image: DecorationImage(
+                                image: MemoryImage(_attachedImage!),
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            right: -10,
+                            top: -10,
+                            child: GestureDetector(
+                              onTap: () => setState(() => _attachedImage = null),
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: const BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close, color: Colors.white, size: 14),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF4F4F5),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Focus(
+                              onKeyEvent: (node, event) {
+                                if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
+                                  final isShift = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+                                                  HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
+                                  if (!isShift) {
+                                    Future.microtask(_sendMessage);
+                                    return KeyEventResult.handled;
+                                  }
+                                }
+                                if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.keyV) {
+                                  final isCtrl = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlLeft) ||
+                                                 HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlRight) ||
+                                                 HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaLeft) ||
+                                                 HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaRight);
+                                  if (isCtrl) {
+                                    Pasteboard.image.then((bytes) {
+                                      if (bytes != null) {
+                                        setState(() {
+                                          _attachedImage = bytes;
+                                        });
+                                      }
+                                    });
+                                  }
+                                }
+                                return KeyEventResult.ignored;
+                              },
+                              child: TextField(
+                                controller: _textController,
+                                minLines: 1,
+                                maxLines: 5,
+                                textInputAction: TextInputAction.newline,
+                                decoration: InputDecoration(
+                                  prefixIcon: IconButton(
+                                    icon: const Icon(Icons.attach_file, color: Colors.black54),
+                                    onPressed: () async {
+                                      final picker = ImagePicker();
+                                      final file = await picker.pickImage(source: ImageSource.gallery);
+                                      if (file != null) {
+                                        final bytes = await file.readAsBytes();
+                                        setState(() {
+                                          _attachedImage = bytes;
+                                        });
+                                      }
                                     },
-                                  )
-                                : null,
+                                  ),
+                                  hintText: 'Ask Vinci to do something',
+                                  hintStyle: const TextStyle(color: Colors.black54),
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  suffixIcon: _textController.text.isNotEmpty
+                                      ? IconButton(
+                                          icon: const Icon(Icons.close, size: 18, color: Colors.black54),
+                                          onPressed: () {
+                                            _textController.clear();
+                                            setState(() {});
+                                          },
+                                        )
+                                      : null,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                        ), // Close Focus
-                      ),
-                    ),
-                    const SizedBox(width: 8),
+                        const SizedBox(width: 8),
                     Container(
                       decoration: BoxDecoration(
                         color: _isTyping ? Colors.red.shade600 : Colors.black,
@@ -1903,10 +2037,12 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                     ),
                   ],
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        );
+        ],
+      ),
+    );
   }
 }
 

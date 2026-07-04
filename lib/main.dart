@@ -30,11 +30,23 @@ class VinciBoardApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
+    final fontName = settings.selectedFont;
+
+    // Apply the user-selected font to the app theme
+    ThemeData theme = DaVinciTheme.lightTheme;
+    try {
+      theme = theme.copyWith(
+        textTheme: GoogleFonts.getTextTheme(fontName, theme.textTheme),
+        primaryTextTheme: GoogleFonts.getTextTheme(fontName, theme.primaryTextTheme),
+      );
+    } catch (_) {
+      // Font name not found — fall back to default theme
+    }
 
     return MaterialApp(
       title: 'Vinci Board',
       debugShowCheckedModeBanner: false,
-      theme: DaVinciTheme.lightTheme,
+      theme: theme,
       home: const SplashScreen(),
     );
   }

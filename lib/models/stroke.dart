@@ -28,6 +28,7 @@ class Stroke {
   final Map<String, dynamic>? customMetadata; // Open-ended state/sync tracking
   final int version; // Event versioning for conflict resolution
   final double? animationProgress; // Tracking animation reveal of the stroke (e.g. 0.0 to 1.0)
+  final Offset? velocity; // Physical velocity for apply_gravity
 
   Stroke({
     String? id,
@@ -47,6 +48,7 @@ class Stroke {
     this.customMetadata,
     this.version = 1,
     this.animationProgress,
+    this.velocity,
   }) : id = id ?? _uuid.v4();
 
   Rect get bounds {
@@ -185,6 +187,7 @@ class Stroke {
     Map<String, dynamic>? customMetadata,
     int? version,
     double? animationProgress,
+    Offset? velocity,
     bool clearGroupId = false,
     bool clearName = false,
   }) {
@@ -206,6 +209,7 @@ class Stroke {
       customMetadata: customMetadata ?? this.customMetadata,
       version: version ?? this.version,
       animationProgress: animationProgress ?? this.animationProgress,
+      velocity: velocity ?? this.velocity,
     );
   }
 

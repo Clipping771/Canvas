@@ -50,7 +50,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
   AnimationController? _cameraController;
   Animation<Matrix4>? _cameraAnimation;
 
-  void _focusOnTarget(Offset targetCenter) {
+  void _focusOnTarget(Offset targetCenter, {CameraIntent intent = CameraIntent.hardFocus}) {
     if (_canvasKey.currentState == null) return;
     
     final size = MediaQuery.of(context).size;
@@ -70,9 +70,14 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
       ..scale(targetScale);
       
     _cameraController?.dispose();
+    
+    int durationMs = 600;
+    if (intent == CameraIntent.softGuide) durationMs = 1500;
+    if (intent == CameraIntent.userAssistedFocus) durationMs = 1000;
+    
     _cameraController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: Duration(milliseconds: durationMs),
     );
     
     _cameraAnimation = Matrix4Tween(
@@ -80,7 +85,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
       end: targetMatrix,
     ).animate(CurvedAnimation(
       parent: _cameraController!,
-      curve: Curves.easeInOut,
+      curve: intent == CameraIntent.softGuide ? Curves.easeOutCubic : Curves.easeInOut,
     ));
     
     _cameraAnimation!.addListener(() {
@@ -127,7 +132,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     if (bounds == null) return;
     
     Future.delayed(const Duration(milliseconds: 300), () {
-       if (mounted) _focusOnTarget(bounds.center);
+       if (mounted) _focusOnTarget(bounds.center, intent: intent ?? CameraIntent.hardFocus);
     });
   }
 

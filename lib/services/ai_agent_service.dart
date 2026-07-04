@@ -22,6 +22,7 @@ class AiAgentService {
   /// Sends the canvas image to the AI agent and returns its response.
   static Future<String> askAgent({
     required List<int> imageBytes,
+    List<int>? attachedImageBytes,
     required String prompt,
     required AiProvider provider,
     required String apiKey,
@@ -202,6 +203,8 @@ Supported actions for the "ops" array:
 21. {"action": "focus_area", "rect": [x, y, w, h]} (CRITICAL: Use this when the user asks you to 'focus' or 'zoom in' or 'look at' a specific object or area of the canvas. Estimate the bounds of the target using the CANVAS SCENE GRAPH data provided!)
 22. {"action": "insert_chemistry", "formula": "H2SO4", "position": [x, y]} (CRITICAL: Use this when the user asks for ANY chemical structure, diagram, or formula like water, benzene, H2SO4, etc. Do NOT try to draw it manually using SVG or shapes!)
 23. {"action": "generate_image", "prompt": "a beautiful countryside landscape", "position": [x, y]} (CRITICAL: Use this when the user asks you to draw a complex scene, realistic landscape, painting, photo, or any high-quality illustration. DO NOT try to draw it procedurally with shapes. This will use an AI image generator to fetch the image and place it on the canvas.)
+24. {"action": "draw_wire", "start": [x1, y1], "end": [x2, y2], "color": "0xFF808080", "size": 4.0} (Use this when the user asks for a physical 'wire', 'cable', or connection line with realistic rendering).
+25. {"action": "draw_portal", "position": [x, y], "radius": 40.0, "color": "0xFF00FFFF"} (Use this when the user asks for a 'portal' or teleportation gate).
 
 CRITICAL UML AND CHARTS RULE: If the user asks for a CHART, GRAPH, WIREFRAME, or MINDMAP, use the `insert_uml` action with valid PlantUML code.
 - Do NOT use `@startsalt` for tables! It looks like a terrible 1990s wireframe and the user hates it!
@@ -259,14 +262,15 @@ User prompt: ''';
       final String fullPrompt = systemInstruction + prompt;
 
       final base64Image = base64Encode(imageBytes);
+      final attachedBase64Image = attachedImageBytes != null ? base64Encode(attachedImageBytes) : null;
 
       switch (provider) {
         case AiProvider.gemini:
-          return await _askGemini(base64Image, fullPrompt, apiKey, modelId, _activeClient!);
+          return await _askGemini(base64Image, attachedBase64Image, fullPrompt, apiKey, modelId, _activeClient!, chatHistory);
         case AiProvider.chatGpt:
-          return await _askOpenAi(base64Image, fullPrompt, apiKey, modelId, _activeClient!);
+          return await _askOpenAi(base64Image, attachedBase64Image, fullPrompt, apiKey, modelId, _activeClient!, chatHistory);
         case AiProvider.claude:
-          return await _askClaude(base64Image, fullPrompt, apiKey, modelId, _activeClient!);
+          return await _askClaude(base64Image, attachedBase64Image, fullPrompt, apiKey, modelId, _activeClient!, chatHistory);
       }
     } catch (e) {
       debugPrint("AI Service Raw Error (${provider.displayName}): $e");
@@ -286,10 +290,12 @@ User prompt: ''';
 
   static Future<String> _askGemini(
     String base64Image,
+    String? attachedBase64Image,
     String prompt,
     String apiKey,
     String modelId,
     http.Client client,
+    List<Map<String, String>> chatHistory,
   ) async {
     final url = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent?key=$apiKey',
@@ -305,9 +311,30 @@ User prompt: ''';
       });
     }
 
+    if (attachedBase64Image != null && attachedBase64Image.isNotEmpty) {
+      parts.add({
+        "inline_data": {"mime_type": "image/png", "data": attachedBase64Image},
+      });
+    }
+
+    final historyParts = chatHistory.map((m) {
+      final role = m['sender'] == 'user' ? 'user' : 'model';
+      return {
+        "role": role,
+        "parts": [{"text": m['text'] ?? ''}]
+      };
+    }).toList();
+    
+    // Convert current prompt into a message
+    final currentMessage = {
+      "role": "user",
+      "parts": parts,
+    };
+
     final payload = {
       "contents": [
-        {"parts": parts},
+        ...historyParts,
+        currentMessage
       ],
     };
 
@@ -330,10 +357,12 @@ User prompt: ''';
 
   static Future<String> _askOpenAi(
     String base64Image,
+    String? attachedBase64Image,
     String prompt,
     String apiKey,
     String modelId,
     http.Client client,
+    List<Map<String, String>> chatHistory,
   ) async {
     final url = Uri.parse('https://api.openai.com/v1/chat/completions');
 
@@ -348,9 +377,25 @@ User prompt: ''';
       });
     }
 
+    if (attachedBase64Image != null && attachedBase64Image.isNotEmpty) {
+      content.add({
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64,$attachedBase64Image"},
+      });
+    }
+
+    final historyMessages = chatHistory.map((m) {
+      final role = m['sender'] == 'user' ? 'user' : 'assistant';
+      return {
+        "role": role,
+        "content": m['text'] ?? ''
+      };
+    }).toList();
+
     final payload = {
       "model": modelId,
       "messages": [
+        ...historyMessages,
         {"role": "user", "content": content},
       ],
       "max_tokens": 1000,
@@ -377,10 +422,12 @@ User prompt: ''';
 
   static Future<String> _askClaude(
     String base64Image,
+    String? attachedBase64Image,
     String prompt,
     String apiKey,
     String modelId,
     http.Client client,
+    List<Map<String, String>> chatHistory,
   ) async {
     final url = Uri.parse('https://api.anthropic.com/v1/messages');
 
@@ -399,10 +446,30 @@ User prompt: ''';
       });
     }
 
+    if (attachedBase64Image != null && attachedBase64Image.isNotEmpty) {
+      content.insert(0, {
+        "type": "image",
+        "source": {
+          "type": "base64",
+          "media_type": "image/png",
+          "data": attachedBase64Image,
+        },
+      });
+    }
+
+    final historyMessages = chatHistory.map((m) {
+      final role = m['sender'] == 'user' ? 'user' : 'assistant';
+      return {
+        "role": role,
+        "content": m['text'] ?? ''
+      };
+    }).toList();
+
     final payload = {
       "model": modelId,
       "max_tokens": 1024,
       "messages": [
+        ...historyMessages,
         {"role": "user", "content": content},
       ],
     };

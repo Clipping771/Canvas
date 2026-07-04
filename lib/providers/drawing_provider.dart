@@ -2,7 +2,6 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -138,6 +137,50 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
   static List<Stroke> clipboard = [];
   Stroke? _currentStroke;
+  Timer? _physicsTimer;
+
+  void _startPhysicsLoop() {
+    if (_physicsTimer?.isActive ?? false) return;
+    _physicsTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
+      bool hasActivePhysics = false;
+      final newStrokes = state.strokes.map<Stroke>((stroke) {
+        if (stroke.physicsEnabled) {
+          hasActivePhysics = true;
+          // Apply gravity (simple constant downward force)
+          final vY = (stroke.velocity?.dy ?? 0.0) + 0.5; // Gravity acceleration
+          final vX = stroke.velocity?.dx ?? 0.0;
+          
+          // Move all points
+          final newPoints = stroke.points.map((p) => Offset(p.dx + vX, p.dy + vY)).toList();
+          
+          // Simple floor collision (stop at Y=1500 for now, or bounce)
+          bool hitFloor = false;
+          for (var p in newPoints) {
+            if (p.dy > 1500) hitFloor = true;
+          }
+          
+          if (hitFloor) {
+            return stroke.copyWith(
+              points: newPoints.map((p) => Offset(p.dx, 1500 - (p.dy - 1500).abs())).toList(),
+              velocity: Offset(vX * 0.8, -vY * 0.5), // Bounce and friction
+            );
+          }
+          
+          return stroke.copyWith(
+            points: newPoints,
+            velocity: Offset(vX, vY),
+          );
+        }
+        return stroke;
+      }).toList();
+
+      if (hasActivePhysics) {
+        state = state.copyWith(strokes: newStrokes);
+      } else {
+        _physicsTimer?.cancel();
+      }
+    });
+  }
 
   void toggleGoldenRatio() {
     state = state.copyWith(showGoldenRatio: !state.showGoldenRatio);
@@ -148,11 +191,12 @@ class DrawingNotifier extends Notifier<DrawingState> {
     _pushUndo();
     final newStrokes = state.strokes.map((s) {
       if (s.groupId == groupId || s.id == groupId || s.name == groupId) {
-        return s.copyWith(physicsEnabled: true);
+        return s.copyWith(physicsEnabled: true, velocity: Offset.zero);
       }
       return s;
     }).toList();
     state = state.copyWith(strokes: newStrokes);
+    _startPhysicsLoop();
   }
 
   void selectAll() {
@@ -576,6 +620,31 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
       ref.read(gamificationProvider.notifier).addXp(5);
 
+      // Shape auto-correction: try to recognise circle / star / spiral
+      final recognized = ShapeRecognizer.recognize(_currentStroke!.points);
+      if (recognized != ShapeType.unknown) {
+        final perfectPoints = ShapeRecognizer.generatePerfectShape(
+          recognized,
+          _currentStroke!.points,
+        );
+        if (perfectPoints.isNotEmpty) {
+          final corrected = Stroke(
+            points: perfectPoints,
+            color: _currentStroke!.color,
+            size: _currentStroke!.size,
+            toolType: _currentStroke!.toolType,
+            isFilled: _currentStroke!.isFilled,
+          );
+          // Replace the last stroke with the corrected one
+          final correctedStrokes = List<Stroke>.from(state.strokes);
+          correctedStrokes.last = corrected;
+          state = state.copyWith(strokes: correctedStrokes);
+          _currentStroke = corrected;
+          // Award the achievement for the first successful correction
+          ref.read(gamificationProvider.notifier).unlockAchievement('shape_master');
+        }
+      }
+
       if (maxX != double.negativeInfinity) {
         state = state.copyWith(lastAddedBounds: currentBounds);
       }
@@ -671,26 +740,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
     }
   }
 
-  void eraseRect(Rect rect) {
-    if (state.strokes.isEmpty) return;
 
-    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
-      ..add(List.from(state.strokes));
-    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
-
-    final newStrokes = state.strokes.where((stroke) {
-      if (stroke.text != null) {
-        return !rect.contains(stroke.points.first);
-      }
-      return !stroke.points.any((p) => rect.contains(p));
-    }).toList();
-
-    state = state.copyWith(
-      strokes: newStrokes,
-      undoHistory: newUndoHistory,
-      redoHistory: [],
-    );
-  }
 
   void eraseText(String textToErase) {
     if (state.strokes.isEmpty) return;
@@ -1145,15 +1195,16 @@ class DrawingNotifier extends Notifier<DrawingState> {
           redoHistory: [],
         );
 
-        // Interpolate points if it's a sparse geometric shape so it draws smoothly like being traced
+        // Interpolate points for smooth drawing animation — always densify
+        // unless the stroke already has many points (e.g. SVG paths extracted at 4px steps)
         List<Offset> densePoints = [];
-        if (stroke.points.length > 1 && stroke.points.length < 20) {
+        if (stroke.points.length > 1 && stroke.points.length < 500) {
           for (int i = 0; i < stroke.points.length - 1; i++) {
             final p1 = stroke.points[i];
             final p2 = stroke.points[i + 1];
             final distance = (p2 - p1).distance;
-            // Add a point every ~3 pixels for smooth animation
-            final numSteps = (distance / 3.0).ceil().clamp(1, 1000);
+            // Add a point every ~2 pixels for smooth animation
+            final numSteps = (distance / 2.0).ceil().clamp(1, 2000);
             for (int step = 0; step < numSteps; step++) {
               densePoints.add(Offset.lerp(p1, p2, step / numSteps)!);
             }
@@ -1166,40 +1217,33 @@ class DrawingNotifier extends Notifier<DrawingState> {
         final totalPoints = densePoints.length;
 
         if (totalPoints > 1) {
-          // Use a Ticker for frame-bound, smooth 60fps animation
-          final completer = Completer<void>();
+          // Use a Future.delayed loop at ~60fps — Ticker can't be used in a
+          // Notifier (no vsync/TickerProvider available outside widgets).
+          final ptsPerFrame = (totalPoints / 120.0).ceil().clamp(1, 15);
           int currentIndex = 1;
 
-          // Slower drawing speed to emphasize the animation
-          // This scales with the number of points so small shapes finish quickly and massive shapes take longer, up to ~2-3 seconds max.
-          final ptsPerFrame = (totalPoints / 120.0).ceil().clamp(2, 10);
+          while (currentIndex < totalPoints) {
+            await Future.delayed(const Duration(milliseconds: 16));
 
-          late Ticker ticker;
-          ticker = Ticker((elapsed) {
-            currentIndex += ptsPerFrame;
-            if (currentIndex >= totalPoints) {
-              currentIndex = totalPoints;
-              ticker.stop();
-              ticker.dispose();
-              if (!completer.isCompleted) completer.complete();
-            }
+            currentIndex = (currentIndex + ptsPerFrame).clamp(0, totalPoints);
 
             _currentStroke = stroke.copyWith(
               points: densePoints.sublist(0, currentIndex),
             );
 
             final updatedStrokes = List<Stroke>.from(state.strokes);
-            updatedStrokes.last = _currentStroke!;
-            state = state.copyWith(strokes: updatedStrokes);
-          });
+            if (updatedStrokes.isNotEmpty) {
+              updatedStrokes.last = _currentStroke!;
+              state = state.copyWith(strokes: updatedStrokes);
+            }
+          }
 
-          ticker.start();
-          await completer.future;
-
-          // Replace final animated stroke with the original complete stroke to preserve all metadata (isFilled, etc)
+          // Replace final animated stroke with the original to preserve all metadata
           final finalStrokes = List<Stroke>.from(state.strokes);
-          finalStrokes.last = stroke;
-          state = state.copyWith(strokes: finalStrokes);
+          if (finalStrokes.isNotEmpty) {
+            finalStrokes.last = stroke;
+            state = state.copyWith(strokes: finalStrokes);
+          }
         }
       }
 
@@ -1399,6 +1443,32 @@ class DrawingNotifier extends Notifier<DrawingState> {
     final count = initialLength - newStrokes.length;
     if (count > 0) state = state.copyWith(strokes: newStrokes);
     return count;
+  }
+
+  void eraseRect(Rect bounds) {
+    _pushUndo();
+    final newStrokes = state.strokes.where((stroke) {
+      if (!stroke.bounds.overlaps(bounds)) {
+        return true; 
+      }
+      
+      // Fine-grained pixel intersection check
+      if (stroke.text != null || stroke.decodedImage != null) {
+        return false; // If text/image bounds overlap, just delete it
+      }
+      
+      for (final sp in stroke.points) {
+        if (bounds.contains(sp)) {
+          return false; 
+        }
+      }
+      
+      return true; // Bounding box overlaps, but no points are inside
+    }).toList();
+
+    if (newStrokes.length != state.strokes.length) {
+      state = state.copyWith(strokes: newStrokes);
+    }
   }
 
   int tagStrokes(List<String> ids, String tag) {

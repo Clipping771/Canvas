@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+﻿import 'dart:typed_data';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -29,6 +29,7 @@ import '../engine/semantic_camera.dart';
 import '../utils/ai_stroke_generator.dart';
 import '../core/theme/da_vinci_theme.dart';
 import '../widgets/gold_glow_container.dart';
+import '../core/widgets/glass_container.dart';
 class CanvasScreen extends ConsumerStatefulWidget {
   final String notebookId;
   final String pageId;
@@ -223,229 +224,122 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
       backgroundColor: AppColors.background,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: AppColors.surface.withOpacity(0.85),
+        backgroundColor: Colors.white,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
         centerTitle: true,
         scrolledUnderElevation: 0,
-        leading: IconButton(
-          icon: const Icon(CupertinoIcons.back),
-          onPressed: () => _saveAndExit(),
+        surfaceTintColor: Colors.transparent,
+        toolbarHeight: 56,
+        leading: Padding(
+          padding: const EdgeInsets.all(10),
+          child: GestureDetector(
+            onTap: () => _saveAndExit(),
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFEEF2FF),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(CupertinoIcons.back, color: Color(0xFF3D5AFE), size: 18),
+            ),
+          ),
         ),
         title: Text(
           page.title,
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w500,
+            fontStyle: FontStyle.italic,
+            color: AppColors.textPrimary,
+            letterSpacing: 0.2,
+          ),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(CupertinoIcons.chevron_left),
-            onPressed: pageIndex > 0
-                ? () {
-                    _saveCurrentPage();
-                    setState(() {
-                      _currentPageId = notebook.pages[pageIndex - 1].id;
-                    });
-                    _loadPageStrokes();
-                  }
-                : null,
-          ),
-          Center(child: Text('${pageIndex + 1}')),
-          IconButton(
-            icon: const Icon(CupertinoIcons.chevron_right),
-            onPressed: pageIndex < notebook.pages.length - 1
-                ? () {
-                    _saveCurrentPage();
-                    setState(() {
-                      _currentPageId = notebook.pages[pageIndex + 1].id;
-                    });
-                    _loadPageStrokes();
-                  }
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(CupertinoIcons.add, size: 24, color: Colors.blueAccent),
-            tooltip: 'New Page',
-            onPressed: () async {
-              _saveCurrentPage();
-              await ref.read(notebookProvider.notifier).addPage(widget.notebookId);
-              if (!mounted) return;
-              final updatedNotebook = ref.read(notebookProvider).firstWhere((n) => n.id == widget.notebookId);
-              final newPage = updatedNotebook.pages.last;
-              setState(() {
-                _currentPageId = newPage.id;
-              });
-              _loadPageStrokes();
-            },
-          ),
-          PopupMenuButton<String>(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+          // Page navigation pill
+          Container(
+            margin: const EdgeInsets.only(right: 8, top: 10, bottom: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEEF2FF),
+              borderRadius: BorderRadius.circular(20),
             ),
-            elevation: 8,
-            color: Colors.white,
-            position: PopupMenuPosition.under,
-            onSelected: (value) {
-              if (value == 'toggle_toolbox') {
-                setState(() {
-                  _showToolbox = !_showToolbox;
-                });
-              } else if (value == 'achievements') {
-                showDialog(
-                  context: context,
-                  builder: (_) => const AchievementsDialog(),
-                );
-              } else if (value == 'change_animation') {
-                _showAnimationDialog();
-              } else if (value == 'rename') {
-                _showRenameDialog(notebook.id, page);
-              } else if (value == 'delete') {
-                Navigator.pop(context); // Pop first
-                Future.microtask(() {
-                  ref
-                      .read(notebookProvider.notifier)
-                      .deletePage(notebook.id, page.id);
-                });
-              } else if (value == 'clear') {
-                ref.read(drawingProvider.notifier).clear();
-              } else if (value == 'focus') {
-                final bounds = ref.read(drawingProvider).lastAddedBounds;
-                if (bounds != null && _canvasKey.currentState != null) {
-                  final size = MediaQuery.of(context).size;
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 28,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: Icon(
+                      CupertinoIcons.chevron_left,
+                      size: 14,
+                      color: pageIndex > 0 ? AppColors.textPrimary : AppColors.textSecondary,
+                    ),
+                    onPressed: pageIndex > 0
+                        ? () {
+                            _saveCurrentPage();
+                            setState(() { _currentPageId = notebook.pages[pageIndex - 1].id; });
+                            _loadPageStrokes();
+                          }
+                        : null,
+                  ),
+                ),
+                Text(
+                  'Page ${pageIndex + 1}',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary),
+                ),
+                SizedBox(
+                  width: 28,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: Icon(
+                      CupertinoIcons.chevron_right,
+                      size: 14,
+                      color: pageIndex < notebook.pages.length - 1 ? AppColors.textPrimary : AppColors.textSecondary,
+                    ),
+                    onPressed: pageIndex < notebook.pages.length - 1
+                        ? () {
+                            _saveCurrentPage();
+                            setState(() { _currentPageId = notebook.pages[pageIndex + 1].id; });
+                            _loadPageStrokes();
+                          }
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Add page button
+          Padding(
+            padding: const EdgeInsets.only(right: 4, top: 10, bottom: 10),
+            child: GestureDetector(
+              onTap: () async {
+                _saveCurrentPage();
+                await ref.read(notebookProvider.notifier).addPage(widget.notebookId);
+                if (!mounted) return;
+                final updatedNotebook = ref.read(notebookProvider).firstWhere((n) => n.id == widget.notebookId);
+                final newPage = updatedNotebook.pages.last;
+                setState(() { _currentPageId = newPage.id; });
+                _loadPageStrokes();
+              },
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(CupertinoIcons.add, color: Colors.white, size: 20),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
 
-                  // Calculate the required scale to fit the bounds with padding
-                  final padding = 200.0;
-                  final scaleX = size.width / (bounds.width + padding);
-                  final scaleY = size.height / (bounds.height + padding);
-                  // Limit the zoom so it doesn't get too close or too far
-                  final targetScale = math.min(scaleX, scaleY).clamp(0.2, 3.0);
-
-                  // Calculate target translation to center the bounds
-                  final targetX =
-                      (size.width / 2) - (bounds.center.dx * targetScale);
-                  final targetY =
-                      (size.height / 2) - (bounds.center.dy * targetScale);
-
-                  final newMatrix = Matrix4.identity()
-                    ..translate(targetX, targetY)
-                    ..scale(targetScale);
-
-                  _canvasKey.currentState!.transformationController.value =
-                      newMatrix;
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('No AI response to focus on!'),
-                    ),
-                  );
-                }
-              }
-            },
-            itemBuilder: (context) => [
-              CheckedPopupMenuItem<String>(
-                value: 'toggle_toolbox',
-                checked: _showToolbox,
-                child: const Text('Show Toolbox'),
-              ),
-              const PopupMenuDivider(),
-              PopupMenuItem<String>(
-                value: 'change_animation',
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(CupertinoIcons.wand_stars, size: 20, color: Colors.purple),
-                        SizedBox(width: 12),
-                        Text('Animations', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500)),
-                      ],
-                    ),
-                    Text(
-                      ref.watch(drawingProvider).easterEggMode.name[0].toUpperCase() + ref.watch(drawingProvider).easterEggMode.name.substring(1),
-                      style: const TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'achievements',
-                child: Row(
-                  children: [
-                    Icon(
-                      CupertinoIcons.rosette,
-                      size: 20,
-                      color: Colors.orange,
-                    ),
-                    SizedBox(width: 12),
-                    Text(
-                      'Achievements',
-                      style: TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'focus',
-                child: Row(
-                  children: [
-                    Icon(
-                      CupertinoIcons.viewfinder,
-                      size: 20,
-                      color: Colors.blue,
-                    ),
-                    SizedBox(width: 12),
-                    Text(
-                      'Focus AI Output',
-                      style: TextStyle(
-                        color: Colors.blue,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'rename',
-                child: Row(
-                  children: [
-                    Icon(
-                      CupertinoIcons.pencil,
-                      size: 20,
-                      color: Colors.black54,
-                    ),
-                    SizedBox(width: 12),
-                    Text('Rename Note'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'clear',
-                child: Row(
-                  children: [
-                    Icon(CupertinoIcons.clear, size: 20, color: Colors.black54),
-                    SizedBox(width: 12),
-                    Text('Clear Page'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(
-                      CupertinoIcons.trash,
-                      size: 20,
-                      color: Colors.redAccent,
-                    ),
-                    SizedBox(width: 12),
-                    Text(
-                      'Delete Note',
-                      style: TextStyle(color: Colors.redAccent),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          Builder(
+            builder: (ctx) => IconButton(
+              icon: const Icon(Icons.more_vert, color: AppColors.textPrimary, size: 20),
+              onPressed: () => _showCanvasMenu(ctx, notebook, page),
+            ),
           ),
         ],
       ),
@@ -647,7 +541,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                 backgroundColor: AppColors.primary,
                 foregroundColor: AppColors.surface,
                 shape: const CircleBorder(),
-                child: const Icon(CupertinoIcons.chat_bubble_text, size: 28),
+                child: const Icon(Icons.chat_bubble_outline, size: 28),
               ),
             ),
           if (_showToolbox)
@@ -664,87 +558,89 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
   }
 
   Widget _buildFloatingDock() {
+    final divider = Container(
+      width: 1, height: 24,
+      color: Colors.grey.shade200,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+    );
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(40),
-        border: Border.all(color: AppColors.divider),
-        boxShadow: DaVinciTheme.warmShadow,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.image, color: Colors.black87),
-                  tooltip: 'Insert Image',
-                  onPressed: _pickImage,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _dockIcon(icon: const Icon(CupertinoIcons.photo, size: 20), tooltip: 'Insert Image', onTap: _pickImage),
+            _dockIcon(icon: const Icon(CupertinoIcons.doc_on_clipboard, size: 20), tooltip: 'Paste', onTap: _pasteSystemClipboard),
+            _dockIcon(icon: const Icon(CupertinoIcons.share, size: 20), tooltip: 'UML', onTap: _showUmlDialog),
+            divider,
+            _dockIcon(icon: const Icon(CupertinoIcons.arrow_uturn_left, size: 20), tooltip: 'Undo', onTap: () => ref.read(drawingProvider.notifier).undo()),
+            _dockIcon(icon: const Icon(CupertinoIcons.arrow_uturn_right, size: 20), tooltip: 'Redo', onTap: () => ref.read(drawingProvider.notifier).redo()),
+            divider,
+            _buildToolButton(ToolType.pan, CupertinoIcons.hand_raised),
+            _buildToolButton(ToolType.select, CupertinoIcons.selection_pin_in_out),
+            _buildDrawingToolButton(),
+            _buildToolButton(ToolType.highlighter, CupertinoIcons.paintbrush),
+            _buildToolButton(ToolType.eraser, _buildEraserIcon),
+            _buildToolButton(ToolType.text, CupertinoIcons.textformat),
+            _buildToolButton(ToolType.wire, CupertinoIcons.link),
+            _buildToolButton(ToolType.portal, CupertinoIcons.circle),
+            divider,
+            GestureDetector(
+              onTap: () => _showToolSettingsDialog(),
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: ref.watch(drawingProvider).currentColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: ref.watch(drawingProvider).currentColor.withValues(alpha: 0.3),
+                      blurRadius: 6,
+                    )
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.paste, color: Colors.black87),
-                  tooltip: 'Paste Image',
-                  onPressed: _pasteSystemClipboard,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.account_tree, color: Colors.black87),
-                  tooltip: 'Create UML',
-                  onPressed: _showUmlDialog,
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.vignette, 
-                    color: ref.watch(drawingProvider).showGoldenRatio ? AppColors.accent : Colors.black87
-                  ),
-                  tooltip: 'Golden Ratio Overlay',
-                  onPressed: () => ref.read(drawingProvider.notifier).toggleGoldenRatio(),
-                ),
-                Container(
-                  width: 1,
-                  height: 24,
-                  color: Colors.grey.shade300,
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.undo, color: Colors.black87),
-                  onPressed: () => ref.read(drawingProvider.notifier).undo(),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.redo, color: Colors.black87),
-                  onPressed: () => ref.read(drawingProvider.notifier).redo(),
-                ),
-                Container(
-                  width: 1,
-                  height: 24,
-                  color: Colors.grey.shade300,
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                _buildToolButton(ToolType.pan, Icons.pan_tool),
-                _buildToolButton(ToolType.select, Icons.highlight_alt),
-                _buildDrawingToolButton(),
-                _buildToolButton(ToolType.highlighter, Icons.highlight),
-                _buildToolButton(ToolType.eraser, _buildEraserIcon),
-                _buildToolButton(ToolType.text, Icons.title),
-                _buildToolButton(ToolType.wire, Icons.cable),
-                _buildToolButton(ToolType.portal, Icons.circle_outlined),
-                Container(
-                  width: 1,
-                  height: 24,
-                  color: Colors.white30,
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.circle,
-                    color: ref.watch(drawingProvider).currentColor,
-                  ),
-                  onPressed: () => _showToolSettingsDialog(),
-                ),
-              ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dockIcon({required Widget icon, required String tooltip, required VoidCallback onTap}) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          decoration: const BoxDecoration(shape: BoxShape.circle),
+          child: Center(
+            child: IconTheme(
+              data: IconThemeData(color: const Color(0xFF3D5AFE).withValues(alpha: 0.65), size: 20),
+              child: icon,
             ),
           ),
-        );
+        ),
+      ),
+    );
   }
 
   Widget _buildDrawingToolButton() {
@@ -758,17 +654,23 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     if (currentTool == ToolType.brush) {
       icon = Icons.brush;
     } else if (currentTool == ToolType.fill)
-      icon = Icons.format_paint;
+      icon = CupertinoIcons.drop_fill;
     else
       icon = Icons.edit;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2.0),
-      child: GoldGlowContainer(
-        isSelected: isDrawingTool,
-        borderRadius: 20,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDrawingTool ? const Color(0xFFEEF2FF) : Colors.transparent,
+          shape: BoxShape.circle,
+        ),
         child: IconButton(
-          icon: Icon(icon, color: isDrawingTool ? AppColors.accent : AppColors.primary),
+          icon: Icon(
+            icon,
+            color: isDrawingTool ? AppColors.primary : const Color(0xFF3D5AFE).withValues(alpha: 0.65),
+            size: 20,
+          ),
           onPressed: () {
             if (isDrawingTool) {
               _showToolSettingsDialog();
@@ -789,7 +691,8 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     if (iconOrBuilder is IconData) {
       iconWidget = Icon(
         iconOrBuilder,
-        color: isSelected ? AppColors.accent : AppColors.primary,
+        color: isSelected ? AppColors.primary : const Color(0xFF3D5AFE).withValues(alpha: 0.65),
+        size: 20,
       );
     } else if (iconOrBuilder is Widget Function(bool)) {
       iconWidget = iconOrBuilder(isSelected);
@@ -799,9 +702,11 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2.0),
-      child: GoldGlowContainer(
-        isSelected: isSelected,
-        borderRadius: 20,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFEEF2FF) : Colors.transparent,
+          shape: BoxShape.circle,
+        ),
         child: IconButton(
           icon: iconWidget,
           onPressed: () {
@@ -993,47 +898,6 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
               ),
             );
           },
-        );
-      },
-    );
-  }
-
-  void _showAnimationDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        final currentMode = ref.watch(drawingProvider).easterEggMode;
-        return SimpleDialog(
-          title: const Text('Animations Mode'),
-          children: EasterEggMode.values
-              .map((value) => SimpleDialogOption(
-                    onPressed: () {
-                      ref.read(drawingProvider.notifier).setEasterEggMode(value);
-                      Navigator.pop(context);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Row(
-                        children: [
-                          Icon(
-                            currentMode == value
-                                ? Icons.radio_button_checked
-                                : Icons.radio_button_unchecked,
-                            color: currentMode == value
-                                ? Theme.of(context).colorScheme.primary
-                                : Colors.grey,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            value.name[0].toUpperCase() + value.name.substring(1),
-                            style: const TextStyle(fontSize: 16),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ))
-              .toList(),
         );
       },
     );
@@ -1250,6 +1114,150 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     });
   }
 
+  void _showCanvasMenu(BuildContext context, dynamic notebook, dynamic page) {
+    final RenderBox button = context.findRenderObject() as RenderBox;
+    final RenderBox overlay = Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
+    final position = RelativeRect.fromRect(
+      Rect.fromPoints(
+        button.localToGlobal(Offset(0, button.size.height), ancestor: overlay),
+        button.localToGlobal(button.size.bottomRight(Offset.zero), ancestor: overlay),
+      ),
+      Offset.zero & overlay.size,
+    );
+    showMenu(
+      context: context,
+      position: position,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 8,
+      color: Colors.white,
+      constraints: const BoxConstraints(minWidth: 260, maxWidth: 260),
+      items: [
+        PopupMenuItem(
+          enabled: false,
+          padding: EdgeInsets.zero,
+          child: _buildCustomMenuContent(notebook, page),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCustomMenuContent(dynamic notebook, dynamic page) {
+    return StatefulBuilder(
+      builder: (context, setMenuState) {
+        final currentAnim = ref.watch(drawingProvider).easterEggMode;
+        Widget buildHeader(String title) {
+          return Padding(
+            padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 8),
+            child: Text(
+              title,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF8B9EB7), letterSpacing: 0.5),
+            ),
+          );
+        }
+        Widget buildSwitchItem(IconData icon, String title, bool value, ValueChanged<bool> onChanged, {bool hasNewBadge = false}) {
+          return InkWell(
+            onTap: () => onChanged(!value),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(icon, size: 20, color: const Color(0xFF5C6B89)),
+                  const SizedBox(width: 12),
+                  Text(title, style: const TextStyle(fontSize: 15, color: Color(0xFF2E384D), fontWeight: FontWeight.w500)),
+                  if (hasNewBadge) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: const Color(0xFFE8F0FE), borderRadius: BorderRadius.circular(10)),
+                      child: const Text('New', style: TextStyle(fontSize: 10, color: Color(0xFF1A73E8), fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                  const Spacer(),
+                  SizedBox(
+                    height: 24,
+                    child: Transform.scale(
+                      scale: 0.8,
+                      child: CupertinoSwitch(value: value, onChanged: onChanged, activeColor: const Color(0xFF3D5AFE)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        Widget buildActionItem(IconData icon, String title, VoidCallback onTap, {bool isDestructive = false}) {
+          final color = isDestructive ? const Color(0xFFD32F2F) : const Color(0xFF2E384D);
+          final iconColor = isDestructive ? const Color(0xFFD32F2F) : const Color(0xFF5C6B89);
+          return InkWell(
+            onTap: () {
+              Navigator.pop(context);
+              onTap();
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(icon, size: 20, color: iconColor),
+                  const SizedBox(width: 12),
+                  Text(title, style: TextStyle(fontSize: 15, color: color, fontWeight: FontWeight.w500)),
+                ],
+              ),
+            ),
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            buildHeader('VIEW'),
+            buildSwitchItem(
+              Icons.grid_view, 'Show toolbox', _showToolbox,
+              (val) {
+                setState(() => _showToolbox = val);
+                setMenuState(() {});
+              },
+            ),
+            buildSwitchItem(
+              Icons.auto_awesome, 'Animations', currentAnim == EasterEggMode.discovery,
+              (val) {
+                ref.read(drawingProvider.notifier).setEasterEggMode(
+                  val ? EasterEggMode.discovery : EasterEggMode.normal
+                );
+              }, hasNewBadge: true,
+            ),
+            buildSwitchItem(
+              Icons.center_focus_strong, 'Focus AI output', false,
+              (val) {
+                final bounds = ref.read(drawingProvider).lastAddedBounds;
+                if (bounds != null && _canvasKey.currentState != null) {
+                  final size = MediaQuery.of(context).size;
+                  final padding = 200.0;
+                  final scaleX = size.width / (bounds.width + padding);
+                  final scaleY = size.height / (bounds.height + padding);
+                  final targetScale = math.min(scaleX, scaleY).clamp(0.2, 3.0);
+                  final targetX = (size.width / 2) - (bounds.center.dx * targetScale);
+                  final targetY = (size.height / 2) - (bounds.center.dy * targetScale);
+                  _canvasKey.currentState!.transformationController.value = Matrix4.identity()..translate(targetX, targetY)..scale(targetScale);
+                }
+                Navigator.pop(context);
+              },
+            ),
+            const Divider(height: 16, color: Color(0xFFE2E8F0)),
+            buildHeader('CANVAS'),
+            buildActionItem(Icons.edit, 'Rename canvas', () => _showRenameDialog(notebook.id, page)),
+            buildActionItem(Icons.military_tech, 'Achievements', () => showDialog(context: context, builder: (_) => const AchievementsDialog())),
+            const Divider(height: 16, color: Color(0xFFE2E8F0)),
+            buildActionItem(Icons.auto_fix_high, 'Clear page', () => ref.read(drawingProvider.notifier).clear(), isDestructive: true),
+            buildActionItem(Icons.delete_outline, 'Delete canvas', () {
+              Future.microtask(() => ref.read(notebookProvider.notifier).deletePage(notebook.id, page.id));
+            }, isDestructive: true),
+            const SizedBox(height: 8),
+          ],
+        );
+      }
+    );
+  }
+
   void _showRenameDialog(String notebookId, NotePage page) {
     final controller = TextEditingController(text: page.title);
     showDialog(
@@ -1324,3 +1332,4 @@ class GoldenRatioPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+

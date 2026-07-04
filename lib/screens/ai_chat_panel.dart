@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,11 +24,14 @@ import '../utils/ai_stroke_generator.dart';
 import '../utils/sketch_templates.dart';
 import '../models/spatial_node.dart';
 import '../engine/weight_controller.dart';
+import '../core/theme/da_vinci_theme.dart';
+import '../core/widgets/glass_container.dart';
 import '../engine/semantic_camera.dart';
 import '../providers/spatial_registry_provider.dart';
 import '../core/event_bus.dart';
 import '../engine/cognitive/cognitive_runtime.dart';
 import '../engine/cognitive/avatar_engine.dart';
+import 'splash_face_data.dart';
 
 class AiChatPanel extends ConsumerStatefulWidget {
   final VoidCallback? onDrawStart;
@@ -371,7 +375,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       // --- Deterministic Gate Engine (Layer 1) ---
       double baseAmbiguityScore = 0.0;
       final textLower = text.toLowerCase().trim();
-      final ambiguousKeywords = ['something', 'nice', 'cool', 'diagram', 'system', 'it', 'this', 'that', 'mindmap', 'ui', 'app', 'design'];
+      final ambiguousKeywords = ['something', 'nice', 'cool', 'diagram', 'system', 'mindmap', 'ui', 'app', 'design'];
       
       if (textLower.length < 30) {
         final words = textLower.split(RegExp(r'\s+'));
@@ -389,7 +393,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       }
 
       final chatHistory = ref.read(aiChatProvider).messages;
-      // currentSettings already read above as `settings` — no need to re-read
+      // currentSettings already read above as `settings` â€” no need to re-read
       
       final response = await Future.any([
         AiAgentService.askAgent(
@@ -400,7 +404,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           apiKey: apiKey,
           modelId: modelId,
           chatHistory: chatHistory.map((m) {
-            // Skip the 'image' key — Uint8List.toString() produces a useless
+            // Skip the 'image' key â€” Uint8List.toString() produces a useless
             // number-array string that wastes tokens. The canvas screenshot
             // already captures all visible content.
             return Map.fromEntries(
@@ -416,7 +420,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         _cancelCompleter!.future,
       ]);
 
-      // Debug logging removed — was using a hardcoded developer path that would
+      // Debug logging removed â€” was using a hardcoded developer path that would
       // crash on any other machine. Use debugPrint for safe cross-platform logging.
       debugPrint("=== AI RESPONSE ===\n$response");
 
@@ -471,6 +475,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
           List actions = [];
           String? aiMessage;
+          bool wasBlocked = false;
           if (data is Map) {
             aiMessage = data['message'] as String?;
             if (data.containsKey('ops')) {
@@ -485,17 +490,16 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
               final intentAnalysis = data['intent_analysis'];
               if (intentAnalysis is Map && intentAnalysis.containsKey('ambiguity_score')) {
                  double llmScore = (intentAnalysis['ambiguity_score'] as num).toDouble();
-                 // Clamp to ±0.2 of baseAmbiguityScore
+                 // Clamp to Â±0.2 of baseAmbiguityScore
                  if (llmScore > baseAmbiguityScore + 0.2) llmScore = baseAmbiguityScore + 0.2;
                  if (llmScore < baseAmbiguityScore - 0.2) llmScore = baseAmbiguityScore - 0.2;
                  
                  // If the final score is > 0.7, enforce Clarification Gate
                  if (llmScore > 0.7 || (data.containsKey('step_0_ambiguity_gate') && data['step_0_ambiguity_gate']['decision'] == 'ask_clarification')) {
+                    wasBlocked = true;
                     if (actions.isNotEmpty) {
-          debugPrint("Client-Side Gate: Ops rejected due to high ambiguity score.");
+                       debugPrint("Client-Side Gate: Ops rejected due to high ambiguity score.");
                        actions.clear();
-                       // Observable Enforcement: Inject a system message to correct state sync
-                       chatNotifier.addMessage({'sender': 'ai', 'text': '[System: Ops blocked by ambiguity gate. The AI generated actions but they were rejected for being too ambiguous without clarification.]'});
                     }
                  }
               }
@@ -503,7 +507,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
           } else if (data is List) {
             actions = List.from(data);
           }
-          // Force all conversational AI responses to be drawn on canvas instead of chat UI
+          // Force conversational AI responses to be drawn on canvas instead of chat UI
           final textToDraw = (aiMessage != null && aiMessage.trim().isNotEmpty) ? aiMessage.trim() : rationaleText?.trim();
           
           if (actions.isEmpty && textToDraw != null && textToDraw.isNotEmpty) {
@@ -650,6 +654,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
     double? internalSafeY;
     Offset? lastPlacedPos;
+    Offset? lastRequestedPos;
 
     for (var action in actions) {
       if (action is Map) {
@@ -1419,15 +1424,16 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             
             Offset p = rawP;
             // Prevent stacking if AI generated multiple items at the exact same coordinate
-            if (lastPlacedPos != null && (p.dx - lastPlacedPos!.dx).abs() < 5 && (p.dy - lastPlacedPos!.dy).abs() < 5) {
+            if (lastRequestedPos != null && (rawP.dx - lastRequestedPos!.dx).abs() < 5 && (rawP.dy - lastRequestedPos!.dy).abs() < 5) {
                 p = Offset(lastPlacedPos!.dx + 380.0 * scale, lastPlacedPos!.dy);
                 if (p.dx > (targetTopLeft?.dx ?? mapPoint(100.0, 100.0).dx) + 1500.0 * scale) { // wrap to next row
                    p = Offset(rawP.dx, lastPlacedPos!.dy + 380.0 * scale);
                 }
             }
+            lastRequestedPos = rawP;
             lastPlacedPos = p;
 
-            // NEW: fetch molecule via ChemistryService (plain JSON/SDF text —
+            // NEW: fetch molecule via ChemistryService (plain JSON/SDF text â€”
             // no CORS issues, no raster PNG, no BlendMode hacks).
             final mol = await ChemistryService.fetchMolecule(formula);
             if (mol == null) {
@@ -1440,7 +1446,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                 size: 1.0,
                 toolType: ToolType.pen,
                 smiles: formula, // persisted key for re-fetch after reload
-                chemMolecule: mol, // already loaded — no spinner needed
+                chemMolecule: mol, // already loaded â€” no spinner needed
                 text: 'chemistry', // kept for scene graph semantic tag
               ),
             );
@@ -1454,12 +1460,13 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
             Offset p = rawP;
             // Prevent stacking if AI generated multiple items at the exact same coordinate
-            if (lastPlacedPos != null && (p.dx - lastPlacedPos!.dx).abs() < 5 && (p.dy - lastPlacedPos!.dy).abs() < 5) {
+            if (lastRequestedPos != null && (rawP.dx - lastRequestedPos!.dx).abs() < 5 && (rawP.dy - lastRequestedPos!.dy).abs() < 5) {
                 p = Offset(lastPlacedPos!.dx + 550.0 * scale, lastPlacedPos!.dy);
                 if (p.dx > (targetTopLeft?.dx ?? mapPoint(100.0, 100.0).dx) + 1500.0 * scale) { // wrap to next row
                    p = Offset(rawP.dx, lastPlacedPos!.dy + 550.0 * scale);
                 }
             }
+            lastRequestedPos = rawP;
             lastPlacedPos = p;
 
             final seed = DateTime.now().millisecondsSinceEpoch;
@@ -1495,7 +1502,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             color: Colors.red,
             size: 1.0,
             toolType: ToolType.pen,
-            text: "🚨 FAILED: $type\nError: $e",
+            text: "ðŸš¨ FAILED: $type\nError: $e",
           ));
           // Advance safeY so next fallback stroke doesn't overlap this one
           internalSafeY = (internalSafeY ?? 100.0) + 150.0;
@@ -1641,13 +1648,13 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
     final summaryParts = <String>[];
     if (objectsAdded > 0) {
-      summaryParts.add("$objectsAdded টি নতুন অবজেক্ট যুক্ত হয়েছে");
+      summaryParts.add("$objectsAdded à¦Ÿà¦¿ à¦¨à¦¤à§à¦¨ à¦…à¦¬à¦œà§‡à¦•à§à¦Ÿ à¦¯à§à¦•à§à¦¤ à¦¹à¦¯à¦¼à§‡à¦›à§‡");
     }
     if (objectsUpdated > 0) {
-      summaryParts.add("$objectsUpdated টি অবজেক্ট আপডেট হয়েছে");
+      summaryParts.add("$objectsUpdated à¦Ÿà¦¿ à¦…à¦¬à¦œà§‡à¦•à§à¦Ÿ à¦†à¦ªà¦¡à§‡à¦Ÿ à¦¹à¦¯à¦¼à§‡à¦›à§‡");
     }
     if (objectsRemoved > 0) {
-      summaryParts.add("$objectsRemoved টি অবজেক্ট মুছে ফেলা হয়েছে");
+      summaryParts.add("$objectsRemoved à¦Ÿà¦¿ à¦…à¦¬à¦œà§‡à¦•à§à¦Ÿ à¦®à§à¦›à§‡ à¦«à§‡à¦²à¦¾ à¦¹à¦¯à¦¼à§‡à¦›à§‡");
     }
     if (unrecognized.isNotEmpty) {
       summaryParts.add(
@@ -1655,385 +1662,553 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       );
     }
 
-    return summaryParts.isEmpty ? "" : "${summaryParts.join(", ")}।";
+    return summaryParts.isEmpty ? "" : "${summaryParts.join(", ")}à¥¤";
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_isTyping) {
-      return const SizedBox.shrink();
-    }
+  void _showModeSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final modeInfo = <AiTutorMode, Map<String, dynamic>>{
+            AiTutorMode.normal: {'icon': Icons.chat_bubble_outline, 'label': 'Normal', 'desc': 'Straightforward answers'},
+            AiTutorMode.eli5: {'icon': Icons.auto_awesome, 'label': 'ELI5', 'desc': 'Plain-language, simple'},
+            AiTutorMode.socratic: {'icon': Icons.help_outline, 'label': 'Socratic', 'desc': 'Guides with questions'},
+            AiTutorMode.roast: {'icon': Icons.local_fire_department, 'label': 'Roast', 'desc': 'Blunt, no-filter critique'},
+            AiTutorMode.exam: {'icon': Icons.fact_check, 'label': 'Exam', 'desc': 'Tests you with practice questions'},
+          };
 
-    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
-    final messages = ref.watch(aiChatProvider).messages;
-
-    return Container(
-          width: math.min(350, MediaQuery.of(context).size.width - 32),
-          height: math.min(500, MediaQuery.of(context).size.height - 250),
-          margin: EdgeInsets.only(
-            bottom: keyboardHeight > 0 ? keyboardHeight + 16 : 80,
-          ),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.grey.withOpacity(0.15), width: 1),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black12,
-                blurRadius: 20,
-                offset: Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              // Header with Tutor Mode Selector
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                child: Row(
+          return Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header row
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text(
-                      'Vinci Agent',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                      'Response mode',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17, color: Color(0xFF111827)),
                     ),
-                    const Spacer(),
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, color: Colors.black54, size: 20),
-                      onSelected: (value) {
-                        if (value == 'clear') {
-                          ref.read(aiChatProvider.notifier).clear();
-                        } else if (value.startsWith('mode_')) {
-                          final modeName = value.split('_')[1];
-                          final mode = AiTutorMode.values.firstWhere((m) => m.name == modeName);
-                          setState(() => _selectedTutorMode = mode);
-                        }
+                    GestureDetector(
+                      onTap: () {
+                        ref.read(aiChatProvider.notifier).clear();
+                        Navigator.pop(ctx);
                       },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: 'clear',
-                          child: Row(
-                            children: [
-                              Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
-                              SizedBox(width: 8),
-                              Text('Clear Chat', style: TextStyle(color: Colors.redAccent)),
-                            ],
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline, color: Colors.red.shade500, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Clear chat',
+                            style: TextStyle(color: Colors.red.shade500, fontWeight: FontWeight.w600, fontSize: 14),
                           ),
-                        ),
-                        const PopupMenuDivider(),
-                        ...AiTutorMode.values.map((mode) => PopupMenuItem(
-                          value: 'mode_${mode.name}',
-                          child: Row(
-                            children: [
-                              Icon(
-                                _selectedTutorMode == mode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                                size: 20,
-                                color: _selectedTutorMode == mode ? Colors.blueAccent : Colors.grey,
-                              ),
-                              const SizedBox(width: 8),
-                              Text('${mode.name.toUpperCase()} Mode'),
-                            ],
-                          ),
-                        )).toList(),
-                      ],
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: Colors.black54, size: 20),
-                      onPressed: () => widget.onClose?.call(),
-                      tooltip: 'Close',
+                        ],
+                      ),
                     ),
                   ],
                 ),
-              ),
-              const Divider(height: 1),
+                const SizedBox(height: 16),
 
-              // Chat Messages
-              Expanded(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: messages.length + (_isTyping ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index == messages.length) {
-                      return Row(
+                // 2-column grid: normal, eli5, socratic, roast
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 1.6,
+                  children: [AiTutorMode.normal, AiTutorMode.eli5, AiTutorMode.socratic, AiTutorMode.roast].map((mode) {
+                    final isSelected = _selectedTutorMode == mode;
+                    final info = modeInfo[mode]!;
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() => _selectedTutorMode = mode);
+                        setModalState(() {});
+                        Navigator.pop(ctx);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+                        decoration: BoxDecoration(
+                          color: isSelected ? AppColors.primary : const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(info['icon'] as IconData, color: isSelected ? Colors.white : const Color(0xFF6B7280), size: 22),
+                            const Spacer(),
+                            Text(
+                              info['label'] as String,
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: isSelected ? Colors.white : const Color(0xFF111827)),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              info['desc'] as String,
+                              style: TextStyle(fontSize: 11.5, color: isSelected ? Colors.white.withValues(alpha: 0.85) : const Color(0xFF6B7280)),
+                              maxLines: 2, overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+
+                // Exam — full width
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: () {
+                    setState(() => _selectedTutorMode = AiTutorMode.exam);
+                    setModalState(() {});
+                    Navigator.pop(ctx);
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                    decoration: BoxDecoration(
+                      color: _selectedTutorMode == AiTutorMode.exam ? AppColors.primary : const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.fact_check,
+                          color: _selectedTutorMode == AiTutorMode.exam ? Colors.white : const Color(0xFF6B7280),
+                          size: 22,
+                        ),
+                        const SizedBox(width: 14),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Exam',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 15,
+                                color: _selectedTutorMode == AiTutorMode.exam ? Colors.white : const Color(0xFF111827),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Tests you with practice questions',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _selectedTutorMode == AiTutorMode.exam ? Colors.white.withValues(alpha: 0.85) : const Color(0xFF6B7280),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final messages = ref.watch(aiChatProvider).messages;
+    final panelWidth = math.min(380.0, MediaQuery.of(context).size.width - 32.0);
+    final panelHeight = math.min(520.0, MediaQuery.of(context).size.height - 220.0);
+
+    // Suggestion chips (shown only when no messages)
+    final suggestions = ['Draw a flowchart', 'Turn notes into a diagram', 'Add sticky notes'];
+
+    return Container(
+      width: panelWidth,
+      height: panelHeight,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 32,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Column(
+          children: [
+            // â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+              child: Row(
+                children: [
+                  // Blue rounded-square icon
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.brush, color: Colors.white, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  // Title + subtitle
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Vinci agent',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                            color: Color(0xFF111827),
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          'Sees your canvas',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ⋮ menu
+                  GestureDetector(
+                    onTap: _showModeSheet,
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 18),
+                    ),
+                  ),
+                  // Ã— close
+                  GestureDetector(
+                    onTap: () => widget.onClose?.call(),
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.close, color: Colors.grey.shade600, size: 14),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+              ),
+            ),
+
+            const Divider(height: 1, thickness: 1, color: Color(0xFFF3F4F6)),
+
+            // â”€â”€ Messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            Expanded(
+              child: ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                itemCount: messages.length + (_isTyping ? 1 : 0),
+                itemBuilder: (context, index) {
+                  // Typing indicator
+                  if (index == messages.length) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          _aiAvatar(),
+                          const SizedBox(width: 10),
                           Container(
-                            margin: const EdgeInsets.only(right: 12),
-                            padding: const EdgeInsets.all(6),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFD6E4FF),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(
-                              Icons.palette_outlined,
-                              color: Color(0xFF1E40AF),
-                              size: 16,
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 16,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF8F9FA),
+                              color: const Color(0xFFF3F4F6),
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: const _BouncingDots(),
                           ),
                         ],
-                      );
-                    }
+                      ),
+                    );
+                  }
 
-                    final msg = messages[index];
-                    final isUser = msg['sender'] == 'user';
+                  final msg = messages[index];
+                  final isUser = msg['sender'] == 'user';
 
-                    if (isUser) {
-                      return Align(
-                        alignment: Alignment.centerRight,
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 16),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(
-                              0xFFF1F5F9,
-                            ), // Normal light grey message style
-                            borderRadius: BorderRadius.circular(
-                              16,
-                            ).copyWith(bottomRight: Radius.zero),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              if (msg['image'] != null && msg['image'] is Uint8List)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8.0),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.memory(
-                                      msg['image'] as Uint8List,
-                                      width: 150,
-                                      fit: BoxFit.contain,
-                                    ),
-                                  ),
-                                ),
-                              if (msg['text']?.toString().isNotEmpty ?? false)
-                                Text(
-                                  msg['text']!.toString(),
-                                  style: const TextStyle(
-                                    color: Colors.black87,
-                                    fontSize: 15,
-                                    height: 1.4,
-                                  ),
-                                ),
-                            ],
+                  if (isUser) {
+                    // User bubble â€” right aligned, light grey
+                    return Align(
+                      alignment: Alignment.centerRight,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12, left: 48),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(16).copyWith(
+                            bottomRight: Radius.zero,
                           ),
                         ),
-                      );
-                    } else {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            Container(
-                              margin: const EdgeInsets.only(right: 12),
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFD6E4FF),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(
-                                Icons.palette_outlined,
-                                color: Color(0xFF1E40AF),
-                                size: 16,
-                              ),
-                            ),
-                            Flexible(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF8F9FA), // Light grey
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Text(
-                                  msg['text']!,
-                                  style: const TextStyle(
-                                    color: Colors.black87,
-                                    fontSize: 15,
-                                    height: 1.4,
+                            if (msg['image'] != null && msg['image'] is Uint8List)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.memory(
+                                    msg['image'] as Uint8List,
+                                    width: 140,
+                                    fit: BoxFit.contain,
                                   ),
                                 ),
                               ),
-                            ),
+                            if (msg['text']?.toString().isNotEmpty ?? false)
+                              Text(
+                                msg['text']!.toString(),
+                                style: const TextStyle(
+                                  color: Color(0xFF111827),
+                                  fontSize: 14,
+                                  height: 1.45,
+                                ),
+                              ),
                           ],
                         ),
-                      );
-                    }
-                  },
-                ),
-              ),
-
-              // Input Area
-              Container(
-                padding: const EdgeInsets.all(12.0),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border(
-                    top: BorderSide(color: Colors.grey.withOpacity(0.15)),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_attachedImage != null)
-                      Stack(
-                        clipBehavior: Clip.none,
+                      ),
+                    );
+                  } else {
+                    // AI bubble â€” left with avatar
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            height: 60,
-                            width: 60,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                              image: DecorationImage(
-                                image: MemoryImage(_attachedImage!),
-                                fit: BoxFit.cover,
+                          _aiAvatar(),
+                          const SizedBox(width: 10),
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF3F4F6),
+                                borderRadius: BorderRadius.circular(16),
                               ),
-                            ),
-                          ),
-                          Positioned(
-                            right: -10,
-                            top: -10,
-                            child: GestureDetector(
-                              onTap: () => setState(() => _attachedImage = null),
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: const BoxDecoration(
-                                  color: Colors.red,
-                                  shape: BoxShape.circle,
+                              child: Text(
+                                msg['text']?.toString() ?? '',
+                                style: const TextStyle(
+                                  color: Color(0xFF111827),
+                                  fontSize: 14,
+                                  height: 1.45,
                                 ),
-                                child: const Icon(Icons.close, color: Colors.white, size: 14),
                               ),
                             ),
                           ),
                         ],
                       ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF4F4F5),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Focus(
-                              onKeyEvent: (node, event) {
-                                if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
-                                  final isShift = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
-                                                  HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
-                                  if (!isShift) {
-                                    Future.microtask(_sendMessage);
-                                    return KeyEventResult.handled;
-                                  }
-                                }
-                                if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.keyV) {
-                                  final isCtrl = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlLeft) ||
-                                                 HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlRight) ||
-                                                 HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaLeft) ||
-                                                 HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaRight);
-                                  if (isCtrl) {
-                                    Pasteboard.image.then((bytes) {
-                                      if (bytes != null) {
-                                        setState(() {
-                                          _attachedImage = bytes;
-                                        });
-                                      }
-                                    });
-                                  }
-                                }
-                                return KeyEventResult.ignored;
-                              },
-                              child: TextField(
-                                controller: _textController,
-                                minLines: 1,
-                                maxLines: 5,
-                                textInputAction: TextInputAction.newline,
-                                decoration: InputDecoration(
-                                  prefixIcon: IconButton(
-                                    icon: const Icon(Icons.attach_file, color: Colors.black54),
-                                    onPressed: () async {
-                                      final picker = ImagePicker();
-                                      final file = await picker.pickImage(source: ImageSource.gallery);
-                                      if (file != null) {
-                                        final bytes = await file.readAsBytes();
-                                        setState(() {
-                                          _attachedImage = bytes;
-                                        });
-                                      }
-                                    },
-                                  ),
-                                  hintText: 'Ask Vinci to do something',
-                                  hintStyle: const TextStyle(color: Colors.black54),
-                                  border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                  suffixIcon: _textController.text.isNotEmpty
-                                      ? IconButton(
-                                          icon: const Icon(Icons.close, size: 18, color: Colors.black54),
-                                          onPressed: () {
-                                            _textController.clear();
-                                            setState(() {});
-                                          },
-                                        )
-                                      : null,
-                                ),
+                    );
+                  }
+                },
+              ),
+            ),
+
+            // â”€â”€ Suggestion chips (shown when chat is empty) â”€â”€â”€â”€â”€â”€â”€
+            if (messages.isEmpty && !_isTyping)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: suggestions.map((s) => GestureDetector(
+                    onTap: () {
+                      _textController.text = s;
+                      _sendMessage();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        border: Border.all(color: const Color(0xFFE5E7EB), width: 1.5),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        s,
+                        style: TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  )).toList(),
+                ),
+              ),
+
+            // â”€â”€ Input bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(
+                  top: BorderSide(color: Color(0xFFF3F4F6), width: 1),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_attachedImage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.memory(_attachedImage!, width: 60, height: 60, fit: BoxFit.cover),
+                          ),
+                          Positioned(
+                            right: -8, top: -8,
+                            child: GestureDetector(
+                              onTap: () => setState(() => _attachedImage = null),
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                                child: const Icon(Icons.close, color: Colors.white, size: 12),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: _isTyping ? Colors.red.shade600 : Colors.black,
-                        shape: BoxShape.circle,
+                        ],
                       ),
-                      child: IconButton(
-                        icon: Icon(
-                          _isTyping ? Icons.stop : Icons.arrow_upward,
-                          color: Colors.white,
-                          size: 20,
+                    ),
+                  Row(
+                    children: [
+                      // Input field
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF3F4F6),
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          child: Row(
+                            children: [
+                              // Paperclip
+                              GestureDetector(
+                                onTap: () async {
+                                  final picker = ImagePicker();
+                                  final file = await picker.pickImage(source: ImageSource.gallery);
+                                  if (file != null) {
+                                    final bytes = await file.readAsBytes();
+                                    setState(() => _attachedImage = bytes);
+                                  }
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 12),
+                                  child: Icon(Icons.attach_file, color: Colors.grey.shade500, size: 20),
+                                ),
+                              ),
+                              // Text field
+                              Expanded(
+                                child: Focus(
+                                  onKeyEvent: (node, event) {
+                                    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
+                                      final isShift = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+                                                      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
+                                      if (!isShift) {
+                                        Future.microtask(_sendMessage);
+                                        return KeyEventResult.handled;
+                                      }
+                                    }
+                                    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.keyV) {
+                                      final isCtrl = HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlLeft) ||
+                                                     HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.controlRight) ||
+                                                     HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaLeft) ||
+                                                     HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.metaRight);
+                                      if (isCtrl) {
+                                        Pasteboard.image.then((bytes) {
+                                          if (bytes != null) setState(() => _attachedImage = bytes);
+                                        });
+                                      }
+                                    }
+                                    return KeyEventResult.ignored;
+                                  },
+                                  child: TextField(
+                                    controller: _textController,
+                                    minLines: 1,
+                                    maxLines: 4,
+                                    textInputAction: TextInputAction.newline,
+                                    style: const TextStyle(fontSize: 14, color: Color(0xFF111827)),
+                                    decoration: InputDecoration(
+                                      hintText: 'Ask Vinci to do something',
+                                      hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                                      border: InputBorder.none,
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        onPressed: _isTyping 
+                      ),
+                      const SizedBox(width: 8),
+                      // Send / Stop button
+                      GestureDetector(
+                        onTap: _isTyping
                             ? () {
                                 setState(() {
                                   _cancelRequested = true;
                                   AiAgentService.cancelRequest();
                                 });
                                 if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
-                                  _cancelCompleter!.complete("Cancelled by user");
+                                  _cancelCompleter!.complete('Cancelled by user');
                                 }
                               }
                             : _sendMessage,
-                        tooltip: _isTyping ? 'Stop Generation' : 'Send',
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: _isTyping ? Colors.red.shade500 : AppColors.primary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            _isTyping ? Icons.stop : Icons.arrow_upward,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _aiAvatar() {
+    return Container(
+      width: 30,
+      height: 30,
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Icon(Icons.brush, color: Colors.white, size: 14),
     );
   }
 }
@@ -2089,4 +2264,42 @@ class _BouncingDotsState extends State<_BouncingDots>
       },
     );
   }
+}
+
+/// Paints the full Da Vinci face (from splash strokes) in white,
+/// designed for small icon sizes (e.g., 34x34).
+class _VinceFaceIconPainter extends CustomPainter {
+  static final List<StrokeData> _strokes = buildDetailedDaVinciStrokes();
+  _VinceFaceIconPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Scale from 200Ã—260 design space â†’ actual size
+    final scaleX = size.width / 200.0;
+    final scaleY = size.height / 260.0;
+    Offset sc(Offset p) => Offset(p.dx * scaleX, p.dy * scaleY);
+
+    for (final stroke in _strokes) {
+      final pts = stroke.points;
+      if (pts.isEmpty) continue;
+
+      final path = Path()..moveTo(sc(pts[0]).dx, sc(pts[0]).dy);
+      for (int j = 1; j < pts.length; j++) {
+        path.lineTo(sc(pts[j]).dx, sc(pts[j]).dy);
+      }
+
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = (stroke.width * scaleX).clamp(0.6, 2.0)
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_VinceFaceIconPainter old) => false;
 }

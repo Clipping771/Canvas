@@ -50,7 +50,7 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
 
     // Total draw time scales with stroke count
-    final drawMs = 200 + _strokes.length * 40; // faster strokes since there are more
+    final drawMs = 200 + _strokes.length * 55; // slower, smoother strokes
 
     _drawCtrl = AnimationController(
       vsync: this,
@@ -138,11 +138,20 @@ class _SplashScreenState extends State<SplashScreen>
         behavior: HitTestBehavior.opaque,
         onTap: _canSkip ? _goHome : null,
         child: Stack(fit: StackFit.expand, children: [
-          // ── Parchment background fades in ──────────────
+          // ── Animated gradient background ──────────────
           AnimatedBuilder(
             animation: _bgFade,
             builder: (_, __) => Container(
-              color: Color.lerp(_kInk, _kParchment, _bgFade.value),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white,
+                    Color.lerp(Colors.white, Colors.blue.shade100, _bgFade.value) ?? Colors.white,
+                  ],
+                ),
+              ),
             ),
           ),
 
@@ -151,15 +160,15 @@ class _SplashScreenState extends State<SplashScreen>
             animation: Listenable.merge([_flickerCtrl, _bgFade]),
             builder: (_, __) {
               final flicker = 0.82 + 0.18 * _flickerCtrl.value;
-              final alpha = (_bgFade.value * 0.55 * flicker).clamp(0.0, 1.0);
+              final alpha = (_bgFade.value * 0.2 * flicker).clamp(0.0, 1.0);
               return Container(
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
                     center: Alignment.center,
                     radius: 0.72,
                     colors: [
-                      _kCandle.withOpacity(alpha * 0.38),
-                      _kParchment.withOpacity(0),
+                      Colors.white.withOpacity(alpha),
+                      Colors.transparent,
                     ],
                   ),
                 ),
@@ -178,7 +187,7 @@ class _SplashScreenState extends State<SplashScreen>
                     radius: 1.1,
                     colors: [
                       Colors.transparent,
-                      _kInk.withOpacity(_bgFade.value * 0.55),
+                      Colors.blue.shade900.withOpacity(_bgFade.value * 0.15),
                     ],
                   ),
                 ),
@@ -190,15 +199,20 @@ class _SplashScreenState extends State<SplashScreen>
           Center(
             child: AnimatedBuilder(
               animation: Listenable.merge([_drawProgress, _glowCtrl]),
-              builder: (_, __) => CustomPaint(
-                size: Size(size.width * 0.58,
-                    size.width * 0.58 * (260 / 200)),
-                painter: _DaVinciFacePainter(
-                  progress: _drawProgress.value,
-                  strokes: _strokes,
-                  glowPulse: _glowCtrl.value,
-                ),
-              ),
+              builder: (_, __) {
+                final double maxFaceWidth = math.min(size.width * 0.65, 280.0);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 120.0), // Keep away from text
+                  child: CustomPaint(
+                    size: Size(maxFaceWidth, maxFaceWidth * (260 / 200)),
+                    painter: _DaVinciFacePainter(
+                      progress: _drawProgress.value,
+                      strokes: _strokes,
+                      glowPulse: _glowCtrl.value,
+                    ),
+                  ),
+                );
+              },
             ),
           ),
 
@@ -216,13 +230,13 @@ class _SplashScreenState extends State<SplashScreen>
                       'Vinci Board',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.cinzel(
-                        color: _kGoldTitle,
+                        color: Colors.blue.shade900,
                         fontSize: 38,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 3,
                         shadows: [
                           Shadow(
-                            color: _kCandle.withOpacity(0.5),
+                            color: Colors.blue.withOpacity(0.15),
                             blurRadius: 18,
                           ),
                         ],
@@ -236,7 +250,7 @@ class _SplashScreenState extends State<SplashScreen>
                       'TAP TO ENTER THE STUDIO',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: _kInkLight,
+                        color: Colors.blue.shade700,
                         fontSize: 11,
                         letterSpacing: 3.5,
                         fontWeight: FontWeight.w500,
@@ -298,13 +312,22 @@ class _DaVinciFacePainter extends CustomPainter {
         strokeFrac = strokesDone - i; // partial 0..1
       }
 
-      final drawCount = ((pts.length - 1) * strokeFrac).round().clamp(1, pts.length - 1);
-
       // ── Build path ─────────────────────────────────────
-      final path = Path();
-      path.moveTo(sc(pts[0]).dx, sc(pts[0]).dy);
-      for (int j = 1; j <= drawCount; j++) {
-        path.lineTo(sc(pts[j]).dx, sc(pts[j]).dy);
+      final fullPath = Path();
+      fullPath.moveTo(sc(pts[0]).dx, sc(pts[0]).dy);
+      for (int j = 1; j < pts.length; j++) {
+        fullPath.lineTo(sc(pts[j]).dx, sc(pts[j]).dy);
+      }
+
+      Path path = fullPath;
+      if (strokeFrac < 1.0) {
+        final metrics = fullPath.computeMetrics().toList();
+        if (metrics.isNotEmpty) {
+           final metric = metrics.first;
+           final extractLength = metric.length * strokeFrac;
+           path = metric.extractPath(0.0, extractLength);
+           penTip = metric.getTangentForOffset(extractLength)?.position;
+        }
       }
 
       // ── Ink colour — darker core strokes, lighter hair ─
@@ -315,19 +338,19 @@ class _DaVinciFacePainter extends CustomPainter {
 
       Color inkColor;
       if (isShade) {
-        inkColor = _kInkLight;
+        inkColor = Colors.blue.shade300;
       } else if (isHair) {
-        inkColor = _kInkMid;
+        inkColor = Colors.blue.shade700;
       } else if (isBeard) {
-        inkColor = _kInkMid;
+        inkColor = Colors.blue.shade700;
       } else {
-        inkColor = _kInk;
+        inkColor = Colors.blue.shade900;
       }
 
       // ── Subtle sfumato glow under thick strokes ────────
       if (stroke.width >= 1.8) {
         final glowPaint = Paint()
-          ..color = _kInkLight.withOpacity(0.18)
+          ..color = Colors.blue.shade200
           ..style = PaintingStyle.stroke
           ..strokeWidth = (stroke.width * scaleX + 4)
           ..strokeCap = StrokeCap.round
@@ -346,10 +369,7 @@ class _DaVinciFacePainter extends CustomPainter {
 
       canvas.drawPath(path, paint);
 
-      // Track pen tip position (last drawn point of last partial stroke)
-      if (strokeFrac < 1.0) {
-        penTip = sc(pts[drawCount]);
-      }
+      // Pen tip position is already calculated via PathMetric tangent above
     }
 
     // ── Pen tip glow ───────────────────────────────────────

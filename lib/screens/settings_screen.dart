@@ -1,10 +1,8 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/ai_provider.dart';
 import '../providers/settings_provider.dart';
-import '../services/api_model_fetcher.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../core/theme/da_vinci_theme.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -15,23 +13,18 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final Map<AiProvider, TextEditingController> _controllers = {};
-  final Map<AiProvider, List<String>> _fetchedModels = {};
-  final Map<AiProvider, bool> _isFetching = {};
 
   @override
   void initState() {
     super.initState();
     for (var provider in AiProvider.values) {
       _controllers[provider] = TextEditingController();
-      _isFetching[provider] = false;
-      _fetchedModels[provider] = [];
     }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Pre-fill controllers from state
     final state = ref.read(settingsProvider);
     for (var provider in AiProvider.values) {
       final key = state.apiKeys[provider];
@@ -49,293 +42,412 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     super.dispose();
   }
 
-  Future<void> _fetchModels(AiProvider provider) async {
-    final apiKey = _controllers[provider]!.text.trim();
-    if (apiKey.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter an API key first.')),
-      );
-      return;
-    }
-
-    setState(() => _isFetching[provider] = true);
-
-    // Save the key first
-    await ref.read(settingsProvider.notifier).saveApiKey(provider, apiKey);
-
-    try {
-      final models = await ApiModelFetcher.fetchModels(provider, apiKey);
-      if (mounted) {
-        setState(() {
-          _fetchedModels[provider] = models;
-          _isFetching[provider] = false;
-        });
-
-        // Auto-select the first model if the currently selected one isn't in the list
-        final currentState = ref.read(settingsProvider);
-        if (currentState.selectedProvider == provider &&
-            !models.contains(currentState.selectedModel) &&
-            models.isNotEmpty) {
-          ref.read(settingsProvider.notifier).setModel(models.first);
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isFetching[provider] = false);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(settingsProvider);
+    const Color headerColor = Color(0xFF8B9EB7);
 
     return Scaffold(
-      backgroundColor: AppColors.background, // Da Vinci background
+      backgroundColor: const Color(0xFFF3F6F9),
       appBar: AppBar(
-        title: const Text(
-          'AI Settings',
-          style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF4A6078), size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'AI settings',
+          style: GoogleFonts.cormorantGaramond(
+            color: const Color(0xFF1E293B),
+            fontSize: 26,
+            fontWeight: FontWeight.w600,
+            fontStyle: FontStyle.italic,
+          ),
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        scrolledUnderElevation: 0,
-        iconTheme: const IconThemeData(color: AppColors.primary),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         children: [
-          const Padding(
-            padding: EdgeInsets.only(bottom: 16.0),
-            child: Text(
-              'Configure your Agentic AI providers below. Select the active provider using the radio buttons on the left.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
+          const Text(
+            'PROVIDER',
+            style: TextStyle(
+              color: headerColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              letterSpacing: 1.2,
             ),
           ),
-          ...AiProvider.values
-              .map((provider) => _buildProviderCard(provider, state)),
+          const SizedBox(height: 12),
+          _buildActiveProviderCard(
+            provider: AiProvider.gemini,
+            title: 'Google Gemini',
+            subtitle: 'gemini-2.5-pro',
+            logoChar: 'G',
+            state: state,
+            isActive: state.selectedProvider == AiProvider.gemini,
+          ),
+          const SizedBox(height: 12),
+          _buildInactiveProviderCard(
+            provider: AiProvider.chatGpt,
+            title: 'ChatGPT',
+            subtitle: 'OpenAI · not connected',
+            logoChar: 'GPT',
+            state: state,
+            isActive: state.selectedProvider == AiProvider.chatGpt,
+          ),
+          const SizedBox(height: 12),
+          _buildInactiveProviderCard(
+            provider: AiProvider.claude,
+            title: 'Claude',
+            subtitle: 'Anthropic · not connected',
+            logoChar: 'C',
+            state: state,
+            isActive: state.selectedProvider == AiProvider.claude,
+          ),
           const SizedBox(height: 32),
           const Text(
-            'App Appearance',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+            'APP APPEARANCE',
+            style: TextStyle(
+              color: headerColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              letterSpacing: 1.2,
+            ),
           ),
-
-          const SizedBox(height: 24),
-          _buildFontSelector(state),
+          const SizedBox(height: 12),
+          _buildAppearanceCard(state),
         ],
       ),
     );
   }
 
-  Widget _buildFontSelector(SettingsState state) {
+  Widget _buildActiveProviderCard({
+    required AiProvider provider,
+    required String title,
+    required String subtitle,
+    required String logoChar,
+    required SettingsState state,
+    required bool isActive,
+  }) {
+    if (!isActive) {
+      return _buildInactiveProviderCard(
+        provider: provider,
+        title: title,
+        subtitle: subtitle,
+        logoChar: logoChar,
+        state: state,
+        isActive: isActive,
+      );
+    }
+    
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
-      child: Material(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-          const Text(
-            'App Font',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: AppColors.textPrimary),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Search and select any Google Font to use across the app.',
-            style: TextStyle(color: AppColors.textSecondary),
-          ),
-          const SizedBox(height: 16),
-          Autocomplete<String>(
-            initialValue: TextEditingValue(text: state.selectedFont),
-            optionsBuilder: (TextEditingValue textEditingValue) {
-              final fonts = GoogleFonts.asMap().keys;
-              if (textEditingValue.text.isEmpty) {
-                return fonts.take(10);
-              }
-              return fonts
-                  .where((String option) {
-                    return option.toLowerCase().contains(
-                      textEditingValue.text.toLowerCase(),
-                    );
-                  })
-                  .take(50);
-            },
-            onSelected: (String selection) {
-              ref.read(settingsProvider.notifier).setFont(selection);
-            },
-            fieldViewBuilder:
-                (context, controller, focusNode, onFieldSubmitted) {
-                  return TextField(
-                    controller: controller,
-                    focusNode: focusNode,
-                    decoration: InputDecoration(
-                      hintText: 'Search fonts (e.g. Roboto, Inter)',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      suffixIcon: const Icon(Icons.font_download_outlined),
-                    ),
-                  );
-                },
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Keyboard Shortcuts',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            title: const Text('Enable Copy/Paste Shortcuts'),
-            subtitle: const Text('Use Ctrl+C, Ctrl+V, and Ctrl+D on the canvas'),
-            value: state.enableKeyboardShortcuts,
-            onChanged: (bool value) {
-              ref.read(settingsProvider.notifier).setEnableKeyboardShortcuts(value);
-            },
-            contentPadding: EdgeInsets.zero,
-          ),
-        ],
-      ),
-        ),
-      ),
-    );
-  }
-
-
-
-  Widget _buildProviderCard(AiProvider provider, SettingsState state) {
-    final isSelected = state.selectedProvider == provider;
-    final hasModels = _fetchedModels[provider]!.isNotEmpty;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
-        border: isSelected ? Border.all(color: AppColors.accent, width: 2) : null,
-        boxShadow: DaVinciTheme.warmShadow,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: ExpansionTile(
-          leading: Radio<AiProvider>(
-          value: provider,
-          groupValue: state.selectedProvider,
-          onChanged: (value) {
-            if (value != null) {
-              ref.read(settingsProvider.notifier).setProvider(value);
-            }
-          },
-          activeColor: AppColors.accent,
-        ),
-        title: Text(
-          provider.displayName,
-          style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-        ),
-        childrenPadding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
-            controller: _controllers[provider],
-            decoration: InputDecoration(
-              labelText: 'API Key',
-              hintText: 'Enter your ${provider.displayName} API key',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.save),
-                onPressed: () {
-                  ref
-                      .read(settingsProvider.notifier)
-                      .saveApiKey(
-                        provider,
-                        _controllers[provider]!.text.trim(),
-                      );
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Key saved locally!')),
-                  );
-                },
-              ),
-            ),
-            obscureText: true,
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _isFetching[provider]!
-                  ? null
-                  : () => _fetchModels(provider),
-              icon: _isFetching[provider]!
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    logoChar,
+                    style: const TextStyle(
+                      color: Color(0xFF475569),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Color(0xFF1E293B),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                        ),
                       ),
-                    )
-                  : const Icon(Icons.cloud_download),
-              label: const Text(
-                'Fetch Active Models',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: AppColors.surface,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Color(0xFF8B9EB7),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Active',
+                    style: TextStyle(
+                      color: Color(0xFF3B82F6),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          if (hasModels) ...[
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              decoration: InputDecoration(
-                labelText: 'Select Model',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'API key',
+                  style: TextStyle(
+                    color: Color(0xFF8B9EB7),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
                 ),
-              ),
-              initialValue:
-                  state.selectedProvider == provider &&
-                      _fetchedModels[provider]!.contains(state.selectedModel)
-                  ? state.selectedModel
-                  : _fetchedModels[provider]!.first,
-              items: _fetchedModels[provider]!.map((model) {
-                return DropdownMenuItem(
-                  value: model,
-                  child: Text(model, overflow: TextOverflow.ellipsis),
-                );
-              }).toList(),
-              onChanged: (value) {
-                if (value != null) {
-                  ref.read(settingsProvider.notifier).setModel(value);
-                  ref.read(settingsProvider.notifier).setProvider(provider);
-                }
-              },
+                const SizedBox(height: 8),
+                Container(
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: TextField(
+                    controller: _controllers[provider],
+                    obscureText: true,
+                    style: const TextStyle(
+                      color: Color(0xFF1E293B),
+                      fontSize: 14,
+                      letterSpacing: 2.0,
+                    ),
+                    decoration: InputDecoration(
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      suffixIcon: const Icon(Icons.edit_outlined, color: Color(0xFF94A3B8), size: 20),
+                    ),
+                    onChanged: (val) {
+                      ref.read(settingsProvider.notifier).saveApiKey(provider, val);
+                    },
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildInactiveProviderCard({
+    required AiProvider provider,
+    required String title,
+    required String subtitle,
+    required String logoChar,
+    required SettingsState state,
+    required bool isActive,
+  }) {
+    if (isActive) {
+      return _buildActiveProviderCard(
+        provider: provider,
+        title: title,
+        subtitle: subtitle,
+        logoChar: logoChar,
+        state: state,
+        isActive: isActive,
+      );
+    }
+    
+    return GestureDetector(
+      onTap: () {
+        ref.read(settingsProvider.notifier).setProvider(provider);
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                logoChar,
+                style: const TextStyle(
+                  color: Color(0xFF94A3B8),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Color(0xFF1E293B),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: Color(0xFF8B9EB7),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Color(0xFFCBD5E1)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppearanceCard(SettingsState state) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'App font',
+                  style: TextStyle(
+                    color: Color(0xFF1E293B),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Search and select any Google Font to use across the app.',
+                  style: TextStyle(
+                    color: Color(0xFF8B9EB7),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  height: 48,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          state.selectedFont,
+                          style: const TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      const Text(
+                        'Aa',
+                        style: TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Copy/paste shortcuts',
+                        style: TextStyle(
+                          color: Color(0xFF1E293B),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Use Ctrl+C, Ctrl+V, and Ctrl+D on the canvas.',
+                        style: TextStyle(
+                          color: Color(0xFF8B9EB7),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: state.enableKeyboardShortcuts,
+                  onChanged: (val) {
+                    ref.read(settingsProvider.notifier).setEnableKeyboardShortcuts(val);
+                  },
+                  activeThumbColor: Colors.white,
+                  activeTrackColor: const Color(0xFF3B82F6),
+                  inactiveThumbColor: Colors.white,
+                  inactiveTrackColor: const Color(0xFFCBD5E1),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

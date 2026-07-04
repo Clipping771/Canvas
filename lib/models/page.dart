@@ -1,4 +1,4 @@
-import 'stroke.dart';
+﻿import 'stroke.dart';
 
 class NotePage {
   final String id;
@@ -9,7 +9,7 @@ class NotePage {
 
   NotePage({
     required this.id,
-    this.title = 'Untitled Note',
+    this.title = 'Untitled Canvas',
     DateTime? dateCreated,
     this.isStarred = false,
     required this.strokes,
@@ -28,7 +28,7 @@ class NotePage {
   factory NotePage.fromJson(Map<String, dynamic> json) {
     return NotePage(
       id: json['id'],
-      title: json['title'] ?? 'Untitled Note',
+      title: json['title'] ?? 'Untitled Canvas',
       dateCreated: json['dateCreated'] != null
           ? DateTime.parse(json['dateCreated'])
           : DateTime.now(),

@@ -17,8 +17,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<Alignment> _topAlignment;
-  late Animation<Alignment> _bottomAlignment;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   String _currentFilter = 'Recent';
   List<String> get _filters => ['Recent', 'Starred', 'All'];
@@ -27,16 +27,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     _controller = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat(reverse: true);
-    _topAlignment = TweenSequence<Alignment>([
-      TweenSequenceItem(tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight), weight: 1),
-    ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-    _bottomAlignment = TweenSequence<Alignment>([
-      TweenSequenceItem(tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft), weight: 1),
-    ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.toLowerCase();
+      });
+    });
   }
 
   @override
   void dispose() {
+    _searchController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -55,6 +55,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
     for (var n in notebooks) {
       for (var p in n.pages) {
         if (_currentFilter == 'Starred' && !p.isStarred) continue;
+        if (_searchQuery.isNotEmpty) {
+          if (!p.title.toLowerCase().contains(_searchQuery) && !n.title.toLowerCase().contains(_searchQuery)) {
+            continue;
+          }
+        }
         allPages.add({'notebookId': n.id, 'page': p});
       }
     }
@@ -66,42 +71,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
       ),
     );
 
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: _topAlignment.value,
-              end: _bottomAlignment.value,
-              colors: const [
-                AppColors.background,
-                AppColors.backgroundAlt,
-              ],
-            ),
-          ),
-          child: child,
-        );
-      },
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: CustomScrollView(
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 120,
-            backgroundColor: Colors.transparent,
+            expandedHeight: 130,
+            backgroundColor: AppColors.background,
             surfaceTintColor: Colors.transparent,
             pinned: true,
-            flexibleSpace: const FlexibleSpaceBar(
-              titlePadding: EdgeInsets.only(left: 20, bottom: 16),
-              title: Text(
-                'Explore',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 28,
-                  color: AppColors.textPrimary,
-                  letterSpacing: -0.5,
-                ),
+            flexibleSpace: FlexibleSpaceBar(
+              titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+              title: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Explore',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 28,
+                      color: AppColors.textPrimary,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  Text(
+                    '${notebooks.length} volume${notebooks.length != 1 ? 's' : ''} • ${allPages.length} canvas${allPages.length != 1 ? 'es' : ''}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.normal,
+                    ),
+                  ),
+                ],
               ),
             ),
             actions: [
@@ -111,9 +113,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                   return Padding(
                     padding: const EdgeInsets.only(right: 8.0, top: 4.0, bottom: 4.0),
                     child: ActionChip(
-                      avatar: const Icon(Icons.star, color: Colors.amber, size: 18),
-                      label: Text('Lvl ${gState.level} (${gState.xp} XP)', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      backgroundColor: AppColors.surface.withOpacity(0.8),
+                      avatar: const Icon(Icons.star_border, color: Colors.amber, size: 18),
+                      label: Text('Lvl ${gState.level} ${gState.xp} XP', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                      backgroundColor: Colors.white,
+                      side: BorderSide(color: Colors.grey.shade300, width: 1),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                       onPressed: () {
                         showDialog(
                           context: context,
@@ -125,7 +129,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                 },
               ),
               IconButton(
-                icon: const Icon(CupertinoIcons.settings, size: 24, color: Colors.black54),
+                icon: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(CupertinoIcons.settings, size: 20, color: Colors.black54),
+                ),
                 onPressed: () {
                   Navigator.push(
                     context,
@@ -133,7 +144,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                   );
                 },
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 16),
             ],
           ),
           SliverToBoxAdapter(
@@ -142,60 +153,127 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
               child: Container(
                 height: 48,
                 decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.03),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: Row(
-                  children: [
-                    const SizedBox(width: 16),
-                    Icon(CupertinoIcons.search, color: Colors.grey.shade400, size: 20),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Search',
-                      style: TextStyle(color: Colors.grey.shade400, fontSize: 16),
-                    ),
-                  ],
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search canvases and volumes',
+                    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 16),
+                    prefixIcon: Icon(Icons.search, color: Colors.grey.shade400, size: 20),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
                 ),
               ),
             ),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 16)),
-          SliverToBoxAdapter(child: _buildFilterBar()),
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 220,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 0.72,
+          SliverToBoxAdapter(child: _buildFilterBar()),          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              child: Row(
+                children: [
+                  if (allPages.isNotEmpty) ...[
+                    Expanded(
+                      flex: 5,
+                      child: _buildFeaturedCard(allPages.first['page'], allPages.first['notebookId']),
+                    ),
+                    const SizedBox(width: 16),
+                  ],
+                  Expanded(
+                    flex: 3,
+                    child: _buildNewVolumeCard(notebooks),
+                  ),
+                ],
               ),
-              delegate: SliverChildBuilderDelegate((context, index) {
-                if (index == 0) {
-                  return _buildNewNoteCard(notebooks);
-                }
-                final item = allPages[index - 1];
-                return _buildNoteCard(
-                  item['page'] as NotePage,
-                  item['notebookId'] as String,
-                );
-              }, childCount: allPages.length + 1),
             ),
           ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 180,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 0.8,
+              ),
+              delegate: SliverChildBuilderDelegate((context, index) {
+                // If there are notes, the first note is featured, so skip index 0
+                final gridNotes = allPages.isNotEmpty ? allPages.sublist(1) : allPages;
+                
+                if (index < gridNotes.length) {
+                  final item = gridNotes[index];
+                  return _buildNoteCard(item['page'], item['notebookId']);
+                } else if (index == gridNotes.length) {
+                  return _buildPlaceholderCard();
+                }
+                return null;
+              }, childCount: (allPages.isNotEmpty ? allPages.length - 1 : 0) + 1),
+            ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 40)),
         ],
-      ),
       ),
     );
   }
 
-  Widget _buildNewNoteCard(List<dynamic> notebooks) {
+  Widget _buildFeaturedCard(NotePage page, String notebookId) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => CanvasScreen(notebookId: notebookId, pageId: page.id)),
+        );
+      },
+      child: Container(
+        height: 180,
+        decoration: BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Text(
+                'Continue',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ),
+            const Spacer(),
+            Text(
+              page.title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 20,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Last edited ${page.dateCreated.day} ${_getMonth(page.dateCreated.month)}',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.8),
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNewVolumeCard(List<dynamic> notebooks) {
     return GestureDetector(
       onTap: () async {
         if (notebooks.isEmpty) {
@@ -210,50 +288,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
         if (!mounted) return;
         Navigator.push(
           context,
-          PageRouteBuilder(
-            transitionDuration: const Duration(milliseconds: 800),
-            pageBuilder: (context, animation, secondaryAnimation) => 
-                CanvasScreen(notebookId: defaultNotebook.id, pageId: newPage.id),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0.02, 0),
-                    end: Offset.zero,
-                  ).animate(CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutCubic,
-                  )),
-                  child: child,
-                ),
-              );
-            },
-          ),
+          MaterialPageRoute(builder: (_) => CanvasScreen(notebookId: defaultNotebook.id, pageId: newPage.id)),
         );
       },
       child: Container(
+        height: 180,
         decoration: BoxDecoration(
-          color: AppColors.background.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.primaryDark.withOpacity(0.4), width: 2, style: BorderStyle.solid),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                CupertinoIcons.add, 
-                color: AppColors.primaryDark, 
-                size: 40,
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: const BoxDecoration(
+                  color: AppColors.accentLight,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  CupertinoIcons.add, 
+                  color: AppColors.primary, 
+                  size: 24,
+                ),
               ),
               const SizedBox(height: 12),
               const Text(
-                'New Volume',
+                'New volume',
                 style: TextStyle(
-                  color: AppColors.primaryDark,
+                  color: AppColors.textPrimary,
                   fontWeight: FontWeight.w600,
-                  fontSize: 16,
+                  fontSize: 14,
                 ),
               ),
             ],
@@ -261,7 +334,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
         ),
       ),
     );
-  }
+  } 
 
   Widget _buildFilterBar() {
     return SizedBox(
@@ -284,20 +357,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: isSelected ? AppColors.primary : AppColors.surface,
+                  color: isSelected ? AppColors.primary : Colors.white,
                   borderRadius: BorderRadius.circular(24),
                   boxShadow: [
-                    BoxShadow(
-                      color: Colors.brown.shade900.withOpacity(isSelected ? 0.2 : 0.05),
-                      blurRadius: isSelected ? 8 : 4,
-                      offset: const Offset(0, 2),
-                    ),
+                    if (!isSelected)
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
                   ],
                 ),
                 child: Text(
                   filter,
                   style: TextStyle(
-                    color: isSelected ? AppColors.surface : AppColors.textSecondary,
+                    color: isSelected ? Colors.white : AppColors.textSecondary,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                     fontSize: 14,
                   ),
@@ -315,130 +389,91 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
       onTap: () {
         Navigator.push(
           context,
-          PageRouteBuilder(
-            transitionDuration: const Duration(milliseconds: 800),
-            pageBuilder: (context, animation, secondaryAnimation) => 
-                CanvasScreen(notebookId: notebookId, pageId: page.id),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0.02, 0),
-                    end: Offset.zero,
-                  ).animate(CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutCubic,
-                  )),
-                  child: child,
-                ),
-              );
-            },
-          ),
+          MaterialPageRoute(builder: (_) => CanvasScreen(notebookId: notebookId, pageId: page.id)),
         );
       },
       child: Container(
         decoration: BoxDecoration(
-          color: AppColors.primary,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(8),
-            bottomLeft: Radius.circular(8),
-            topRight: Radius.circular(12),
-            bottomRight: Radius.circular(12),
-          ),
-          boxShadow: DaVinciTheme.warmShadow,
-          border: const Border(
-            right: BorderSide(color: AppColors.background, width: 4),
-          ),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
-        clipBehavior: Clip.antiAlias,
-        child: Row(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 14, 
-              decoration: BoxDecoration(
-                color: AppColors.primaryDark,
-                gradient: LinearGradient(
-                  colors: [
-                    AppColors.primaryDark,
-                    AppColors.primaryDark.withOpacity(0.7),
-                    AppColors.primaryDark,
-                  ],
-                ),
-              ),
-            ), // Book spine
             Expanded(
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            page.strokes.isNotEmpty ? CupertinoIcons.book : CupertinoIcons.book_circle,
-                            color: AppColors.accent.withOpacity(0.5),
-                            size: 32,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            page.title,
-                            style: const TextStyle(
-                              color: AppColors.accent,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 18,
-                              letterSpacing: 0.5,
-                            ),
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '${page.dateCreated.day} ${_getMonth(page.dateCreated.month)}',
-                            style: TextStyle(
-                              color: AppColors.accent.withOpacity(0.7),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-            Positioned(
-              top: 10,
-              right: 10,
-              child: GestureDetector(
-                onTap: () {
-                  ref
-                      .read(notebookProvider.notifier)
-                      .togglePageStar(notebookId, page.id);
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryDark.withOpacity(0.4),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    page.isStarred
-                        ? CupertinoIcons.star_fill
-                        : CupertinoIcons.star,
-                    color: page.isStarred
-                        ? AppColors.accent
-                        : AppColors.accent.withOpacity(0.3),
-                    size: 18,
-                  ),
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: Icon(Icons.brush, color: AppColors.primary, size: 24),
                 ),
               ),
             ),
-                ],
+            const SizedBox(height: 12),
+            Text(
+              page.title,
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${page.dateCreated.day} ${_getMonth(page.dateCreated.month)}',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 12,
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholderCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          CustomPaint(
+            painter: _DashedRectPainter(color: Colors.grey.shade400),
+          ),
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(CupertinoIcons.sparkles, color: Colors.grey.shade500, size: 24),
+                const SizedBox(height: 8),
+                Text(
+                  'More here soon',
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -460,4 +495,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
     ];
     return months[month - 1];
   }
+}
+
+class _DashedRectPainter extends CustomPainter {
+  final Color color;
+  _DashedRectPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    const dashWidth = 6.0;
+    const dashSpace = 4.0;
+    const radius = 12.0;
+
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      const Radius.circular(radius),
+    );
+
+    final path = Path()..addRRect(rect);
+    final dashPath = _dashPath(path, dashWidth, dashSpace);
+    canvas.drawPath(dashPath, paint);
+  }
+
+  Path _dashPath(Path source, double dashWidth, double dashSpace) {
+    final result = Path();
+    for (final metric in source.computeMetrics()) {
+      double dist = 0;
+      while (dist < metric.length) {
+        result.addPath(
+          metric.extractPath(dist, dist + dashWidth),
+          Offset.zero,
+        );
+        dist += dashWidth + dashSpace;
+      }
+    }
+    return result;
+  }
+
+  @override
+  bool shouldRepaint(_DashedRectPainter oldDelegate) => oldDelegate.color != color;
 }

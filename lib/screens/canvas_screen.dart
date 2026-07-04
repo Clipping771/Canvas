@@ -106,20 +106,66 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadPageStrokes();
+      // Listen for text-insert requests from the canvas (text tool taps)
+      ref.read(drawingProvider.notifier).textInsertRequest.addListener(_onTextInsertRequest);
     });
     EventBus().subscribe(EventType.aiActionDispatched, _handleQuizEvent);
     EventBus().subscribe(EventType.aiTaskCompleted, _handleAiTaskCompleted);
-    
-    // Initialize OS layers
     CognitiveRuntime().initialize();
   }
-  
+
   @override
   void dispose() {
+    ref.read(drawingProvider.notifier).textInsertRequest.removeListener(_onTextInsertRequest);
     CognitiveRuntime().shutdown();
     _cameraController?.dispose();
     _canvasFocusNode.dispose();
     super.dispose();
+  }
+
+  void _onTextInsertRequest() {
+    final pos = ref.read(drawingProvider.notifier).textInsertRequest.value;
+    if (pos == null) return;
+    // Reset so the listener doesn't fire again immediately
+    ref.read(drawingProvider.notifier).textInsertRequest.value = null;
+    _showTextInputDialog(pos);
+  }
+
+  Future<void> _showTextInputDialog(Offset canvasPosition) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      barrierColor: Colors.black26,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Text'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
+          textInputAction: TextInputAction.newline,
+          decoration: const InputDecoration(
+            hintText: 'Type your text here...',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => Navigator.of(ctx).pop(controller.text),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('Place'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && result.trim().isNotEmpty) {
+      ref.read(drawingProvider.notifier).placeText(result.trim(), canvasPosition);
+    }
+    controller.dispose();
   }
 
   void _handleAiTaskCompleted(CanvasEvent event) {
@@ -679,6 +725,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                 _buildDrawingToolButton(),
                 _buildToolButton(ToolType.highlighter, Icons.highlight),
                 _buildToolButton(ToolType.eraser, _buildEraserIcon),
+                _buildToolButton(ToolType.text, Icons.title),
                 _buildToolButton(ToolType.wire, Icons.cable),
                 _buildToolButton(ToolType.portal, Icons.circle_outlined),
                 Container(
@@ -758,7 +805,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
         child: IconButton(
           icon: iconWidget,
           onPressed: () {
-            if (isSelected) {
+            if (isSelected && type != ToolType.text) {
               _showToolSettingsDialog();
             } else {
               ref.read(drawingProvider.notifier).setTool(type);

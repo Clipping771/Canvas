@@ -11,4 +11,5 @@ enum ToolType {
   fill,
   wire,
   portal,
+  text,
 }

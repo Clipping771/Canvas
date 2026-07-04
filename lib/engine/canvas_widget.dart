@@ -48,14 +48,21 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
 
     return InteractiveViewer(
       transformationController: transformationController,
-      panEnabled: true,
+      panEnabled: drawingState.currentTool == ToolType.pan,
       scaleEnabled: true,
-      minScale: 0.00001, // Practically infinite zoom out
-      maxScale: 10000.0, // Practically infinite zoom in
+      minScale: 0.00001,
+      maxScale: 10000.0,
       constrained: false,
       boundaryMargin: const EdgeInsets.all(double.infinity),
       child: GestureDetector(
-        onPanStart: drawingState.currentTool == ToolType.pan
+        onTapUp: (details) {
+          // Text tool: tap to place text at that canvas position
+          if (drawingState.currentTool == ToolType.text) {
+            notifier.requestTextAt(details.localPosition);
+          }
+        },
+        onPanStart: (drawingState.currentTool == ToolType.pan ||
+                drawingState.currentTool == ToolType.text)
             ? null
             : (details) {
                 if (drawingState.currentTool == ToolType.select) {
@@ -69,7 +76,8 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
                   notifier.startStroke(details.localPosition);
                 }
               },
-        onPanUpdate: drawingState.currentTool == ToolType.pan
+        onPanUpdate: (drawingState.currentTool == ToolType.pan ||
+                drawingState.currentTool == ToolType.text)
             ? null
             : (details) {
                 if (drawingState.currentTool == ToolType.select &&
@@ -82,12 +90,12 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
                   notifier.updateStroke(details.localPosition);
                 }
               },
-        onPanEnd: drawingState.currentTool == ToolType.pan
+        onPanEnd: (drawingState.currentTool == ToolType.pan ||
+                drawingState.currentTool == ToolType.text)
             ? null
             : (details) {
                 if (drawingState.currentTool == ToolType.select &&
                     _marqueeNotifier.value != null) {
-                  // If the user just tapped (very small rect), inflate it so it selects the individual object under their finger!
                   Rect searchRect = _marqueeNotifier.value!;
                   if (searchRect.width < 10 && searchRect.height < 10) {
                     searchRect = searchRect.inflate(30);

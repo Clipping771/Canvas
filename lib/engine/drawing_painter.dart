@@ -172,25 +172,32 @@ class DrawingCanvasPainter extends CustomPainter {
         if (stroke.rotation != 0.0) {
           canvas.rotate(stroke.rotation);
         }
+
+        final isUserText = stroke.toolType == ToolType.text;
         final hasBengali = stroke.text!.codeUnits.any(
           (c) => c >= 0x0980 && c <= 0x09FF,
         );
         final baseStyle = TextStyle(
-          color: stroke.color, 
+          color: stroke.color,
           fontSize: stroke.size,
-          height: 1.5, // Expands line height to prevent clipping tall handwriting ascenders
+          height: 1.5,
         );
 
-        final textStyle = hasBengali
-            ? GoogleFonts.galada(textStyle: baseStyle)
-            : GoogleFonts.nanumPenScript(textStyle: baseStyle);
+        // User-typed text uses a clean readable font; AI-drawn text keeps handwriting
+        final textStyle = isUserText
+            ? (hasBengali
+                ? GoogleFonts.galada(textStyle: baseStyle)
+                : GoogleFonts.inter(textStyle: baseStyle))
+            : (hasBengali
+                ? GoogleFonts.galada(textStyle: baseStyle)
+                : GoogleFonts.nanumPenScript(textStyle: baseStyle));
 
         final textSpan = TextSpan(text: stroke.text, style: textStyle);
         final textPainter = TextPainter(
           text: textSpan,
           textDirection: TextDirection.ltr,
         );
-        textPainter.layout(maxWidth: stroke.size * 30.0); // Wrap based on font size
+        textPainter.layout(maxWidth: stroke.size * 30.0);
         textPainter.paint(canvas, Offset.zero);
         canvas.restore();
         return;

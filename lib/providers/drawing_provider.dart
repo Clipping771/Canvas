@@ -1252,10 +1252,31 @@ class DrawingNotifier extends Notifier<DrawingState> {
   }
 
   void setTool(ToolType tool) {
-    if (tool != ToolType.select) {
+    if (tool != ToolType.select && tool != ToolType.text) {
       clearSelection();
     }
     state = state.copyWith(currentTool: tool);
+  }
+
+  // ValueNotifier used to signal canvas_screen to show a text input dialog.
+  // canvas_widget calls requestTextAt(pos) → canvas_screen listens and shows dialog.
+  final ValueNotifier<Offset?> textInsertRequest = ValueNotifier(null);
+
+  void requestTextAt(Offset canvasPosition) {
+    textInsertRequest.value = canvasPosition;
+  }
+
+  /// Called by canvas_screen after the user typed text in the dialog.
+  void placeText(String text, Offset position) {
+    if (text.trim().isEmpty) return;
+    final stroke = Stroke(
+      points: [position],
+      color: state.currentColor,
+      size: state.currentSize * 6.0, // font-size feel
+      toolType: ToolType.text,
+      text: text,
+    );
+    addStrokes([stroke]);
   }
 
   void setColor(Color color) {

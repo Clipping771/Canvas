@@ -217,7 +217,7 @@ class TeslaEngine {
             final isPowered = sourcePin.state.logic == LogicState.high || sourcePin.state.voltage > 0;
             final targetColor = isPowered ? Colors.orange : Colors.grey;
 
-            if (stroke.color != targetColor || stroke.points.length != bezierPoints.length || (stroke.points.isNotEmpty && stroke.points.first != bezierPoints.first)) {
+            if (stroke.color != targetColor || stroke.points.length != bezierPoints.length || (stroke.points.isNotEmpty && stroke.points.first != bezierPoints.first) || stroke.size != 4.0) {
               updatedStrokes.add(stroke.copyWith(
                 color: targetColor,
                 points: bezierPoints,

@@ -552,7 +552,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
       color: state.currentTool == ToolType.eraser
           ? Colors.transparent
           : state.currentColor,
-      size: state.currentSize,
+      size: state.currentTool == ToolType.wire ? 4.0 : state.currentSize,
       toolType: state.currentTool,
       isFilled: state.currentTool == ToolType.fill,
     );

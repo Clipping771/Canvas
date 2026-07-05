@@ -125,20 +125,23 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
   }
 
   void _onTextInsertRequest() {
-    final pos = ref.read(drawingProvider.notifier).textInsertRequest.value;
-    if (pos == null) return;
+    final req = ref.read(drawingProvider.notifier).textInsertRequest.value;
+    if (req == null) return;
     // Reset so the listener doesn't fire again immediately
     ref.read(drawingProvider.notifier).textInsertRequest.value = null;
-    _showTextInputDialog(pos);
+    
+    final Offset pos = req['position'];
+    final Stroke? existingStroke = req['stroke'];
+    _showTextInputDialog(pos, existingStroke);
   }
 
-  Future<void> _showTextInputDialog(Offset canvasPosition) async {
-    final controller = TextEditingController();
+  Future<void> _showTextInputDialog(Offset canvasPosition, Stroke? existingStroke) async {
+    final controller = TextEditingController(text: existingStroke?.text ?? '');
     final result = await showDialog<String>(
       context: context,
       barrierColor: Colors.black26,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add Text'),
+        title: Text(existingStroke != null ? 'Edit Text' : 'Add Text'),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -153,18 +156,35 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
+            onPressed: () => Navigator.of(ctx).pop(null), // cancel
             child: const Text('Cancel'),
           ),
+          if (existingStroke != null)
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(''), // Empty string deletes it
+              child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(controller.text),
-            child: const Text('Place'),
+            child: Text(existingStroke != null ? 'Save' : 'Place'),
           ),
         ],
       ),
     );
-    if (result != null && result.trim().isNotEmpty) {
-      ref.read(drawingProvider.notifier).placeText(result.trim(), canvasPosition);
+    
+    if (result != null) {
+      if (existingStroke != null) {
+        if (result.trim().isEmpty) {
+          ref.read(drawingProvider.notifier).removeStroke(existingStroke.id);
+        } else {
+          ref.read(drawingProvider.notifier).updateStrokeById(
+            existingStroke.id,
+            (s) => s.copyWith(text: result.trim(), version: s.version + 1),
+          );
+        }
+      } else if (result.trim().isNotEmpty) {
+        ref.read(drawingProvider.notifier).placeText(result.trim(), canvasPosition);
+      }
     }
     controller.dispose();
   }

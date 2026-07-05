@@ -1394,10 +1394,13 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
   // ValueNotifier used to signal canvas_screen to show a text input dialog.
   // canvas_widget calls requestTextAt(pos) → canvas_screen listens and shows dialog.
-  final ValueNotifier<Offset?> textInsertRequest = ValueNotifier(null);
+  final ValueNotifier<Map<String, dynamic>?> textInsertRequest = ValueNotifier(null);
 
-  void requestTextAt(Offset canvasPosition) {
-    textInsertRequest.value = canvasPosition;
+  void requestTextAt(Offset canvasPosition, {Stroke? existingStroke}) {
+    textInsertRequest.value = {
+      'position': canvasPosition,
+      'stroke': existingStroke,
+    };
   }
 
   /// Called by canvas_screen after the user typed text in the dialog.
@@ -1406,7 +1409,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
     final stroke = Stroke(
       points: [position],
       color: state.currentColor,
-      size: state.currentSize * 6.0, // font-size feel
+      size: 24.0, // Fixed comfortable size for Text Tool
       toolType: ToolType.text,
       text: text,
     );

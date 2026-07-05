@@ -171,6 +171,7 @@ class TeslaEngine {
               updatedStrokes.add(stroke.copyWith(
                 color: targetColor,
                 points: bezierPoints,
+                size: 4.0, // Force a sleek size for autowires!
                 version: stroke.version + 1,
               ));
               continue;

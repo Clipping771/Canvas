@@ -76,7 +76,14 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
         onTapUp: (details) {
           // Text tool: tap to place text at that canvas position
           if (drawingState.currentTool == ToolType.text) {
-            notifier.requestTextAt(details.localPosition);
+            final tapPos = details.localPosition;
+            Stroke? hitStroke;
+            try {
+              hitStroke = drawingState.strokes.reversed.firstWhere(
+                (s) => s.toolType == ToolType.text && s.bounds.inflate(20).contains(tapPos)
+              );
+            } catch (_) {}
+            notifier.requestTextAt(tapPos, existingStroke: hitStroke);
           }
         },
         onPanStart: (drawingState.currentTool == ToolType.pan ||

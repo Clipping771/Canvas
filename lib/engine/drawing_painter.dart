@@ -27,6 +27,9 @@ class DrawingCanvasPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Wrap everything in a saveLayer so BlendMode.clear only clears strokes and not the background
+    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
+
     // Cache static strokes (all but the last active stroke)
     final staticCount = strokes.isNotEmpty ? strokes.length - 1 : 0;
 
@@ -46,12 +49,12 @@ class DrawingCanvasPainter extends CustomPainter {
       canvas.drawPicture(_cachedPicture!);
     }
 
-    // Always draw the active (last) stroke — no viewport culling here.
-    // Culling a zero-size rect (e.g. first animation frame with 1 point) would
-    // incorrectly skip the stroke and make animation appear broken.
+    // Always draw the active (last) stroke
     if (strokes.isNotEmpty) {
       _drawStroke(canvas, strokes.last);
     }
+
+    canvas.restore();
   }
 
   void _drawStroke(Canvas canvas, Stroke stroke) {

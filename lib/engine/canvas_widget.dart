@@ -13,8 +13,6 @@ import '../widgets/chemistry_widget.dart';
 import '../services/chemistry_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../engine/cognitive/cognitive_runtime.dart';
-import '../widgets/ai_avatar_widget.dart';
-
 class CanvasWidget extends ConsumerStatefulWidget {
   const CanvasWidget({super.key});
 
@@ -123,8 +121,6 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
                   notifier.selectStrokesInRect(searchRect);
                   _marqueeStart = null;
                   _marqueeNotifier.value = null;
-                } else if (drawingState.currentTool == ToolType.eraser) {
-                  notifier.commitErasure();
                 } else if (drawingState.currentTool != ToolType.select) {
                   notifier.endStroke();
                 }
@@ -327,7 +323,6 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
                   notifier.clearSelection();
                 },
               ),
-            AiAvatarWidget(engine: CognitiveRuntime().avatarEngine),
             if (drawingState.aiStatus != null && drawingState.aiStatusTarget != null)
               Positioned(
                 left: drawingState.aiStatusTarget!.dx,

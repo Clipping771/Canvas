@@ -606,6 +606,18 @@ class DrawingNotifier extends Notifier<DrawingState> {
         _currentStroke = null;
         return;
       }
+      
+      if (state.currentTool == ToolType.eraser) {
+        // 1. Remove the eraser stroke itself from the canvas
+        final newStrokesWithoutEraser = List<Stroke>.from(state.strokes)..removeLast();
+        state = state.copyWith(strokes: newStrokesWithoutEraser);
+        
+        // 2. Erase the strokes it intersects with
+        _executeWidgetErasure();
+        
+        _currentStroke = null;
+        return;
+      }
 
       // Calculate Bounds
       double minX = double.infinity, minY = double.infinity;
@@ -1375,63 +1387,6 @@ class DrawingNotifier extends Notifier<DrawingState> {
     }
   }
 
-  void commitErasure() {
-    if (_currentStroke == null || _currentStroke!.toolType != ToolType.eraser || state.strokes.isEmpty) {
-      return;
-    }
-
-    final newUndoHistory = List<List<Stroke>>.from(state.undoHistory)
-      ..add(List.from(state.strokes));
-    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);
-
-    double eMinX = double.infinity, eMinY = double.infinity;
-    double eMaxX = double.negativeInfinity, eMaxY = double.negativeInfinity;
-    for (var p in _currentStroke!.points) {
-      if (p.dx < eMinX) eMinX = p.dx;
-      if (p.dy < eMinY) eMinY = p.dy;
-      if (p.dx > eMaxX) eMaxX = p.dx;
-      if (p.dy > eMaxY) eMaxY = p.dy;
-    }
-    
-    final eraserRadius = _currentStroke!.size;
-    final eraserBounds = Rect.fromLTRB(
-      eMinX - eraserRadius, 
-      eMinY - eraserRadius, 
-      eMaxX + eraserRadius, 
-      eMaxY + eraserRadius
-    );
-
-    final eraserPoints = _currentStroke!.points;
-    final radiusSq = eraserRadius * eraserRadius;
-
-    final newStrokes = state.strokes.where((stroke) {
-      if (!stroke.bounds.overlaps(eraserBounds)) {
-        return true; 
-      }
-      if (stroke.text != null) {
-        final p = stroke.points.first;
-        for (final ep in eraserPoints) {
-          if ((p - ep).distanceSquared <= radiusSq) return false; 
-        }
-        return true;
-      }
-      for (final sp in stroke.points) {
-        for (final ep in eraserPoints) {
-          if ((sp - ep).distanceSquared <= radiusSq) {
-            return false; 
-          }
-        }
-      }
-      return true;
-    }).toList();
-
-    _currentStroke = null;
-
-    if (newStrokes.length != state.strokes.length) {
-      state = state.copyWith(strokes: newStrokes, undoHistory: newUndoHistory, redoHistory: []);
-    }
-  }
-
   void _pushUndo() {
     final newUndoHistory = List<List<Stroke>>.from(state.undoHistory);
     newUndoHistory.add(List.from(state.strokes));
@@ -1534,8 +1489,69 @@ class DrawingNotifier extends Notifier<DrawingState> {
     if (count > 0) state = state.copyWith(strokes: newStrokes);
     return count;
   }
-}
 
-final drawingProvider = NotifierProvider<DrawingNotifier, DrawingState>(
-  DrawingNotifier.new,
-);
+  void _executeWidgetErasure() {
+    if (_currentStroke == null || state.strokes.isEmpty) return;
+    
+    double eMinX = double.infinity, eMinY = double.infinity;
+    double eMaxX = double.negativeInfinity, eMaxY = double.negativeInfinity;
+    for (var p in _currentStroke!.points) {
+      if (p.dx < eMinX) eMinX = p.dx;
+      if (p.dy < eMinY) eMinY = p.dy;
+      if (p.dx > eMaxX) eMaxX = p.dx;
+      if (p.dy > eMaxY) eMaxY = p.dy;
+    }
+    
+    final eraserRadius = _currentStroke!.size;
+    final eraserBounds = Rect.fromLTRB(
+      eMinX - eraserRadius, 
+      eMinY - eraserRadius, 
+      eMaxX + eraserRadius, 
+      eMaxY + eraserRadius
+    );
+
+    final eraserPoints = _currentStroke!.points;
+
+    final newStrokes = state.strokes.where((stroke) {
+      if (!stroke.bounds.overlaps(eraserBounds)) {
+        return true; 
+      }
+      
+      // For widgets, chemistry, images etc., bounds overlap is enough to delete
+      if (stroke.toolType == ToolType.latex || 
+          stroke.toolType == ToolType.widget || 
+          stroke.smiles != null ||
+          stroke.imageBytes != null ||
+          stroke.text != null) {
+        return false;
+      }
+      
+      // For drawing strokes, do a fine-grained point intersection
+      final combinedRadius = eraserRadius + stroke.size;
+      final combinedRadiusSq = combinedRadius * combinedRadius;
+      
+      for (var sp in stroke.points) {
+        for (var ep in eraserPoints) {
+          final distSq = (sp.dx - ep.dx)*(sp.dx - ep.dx) + (sp.dy - ep.dy)*(sp.dy - ep.dy);
+          if (distSq <= combinedRadiusSq) {
+            return false; // delete this stroke
+          }
+        }
+      }
+      
+      return true;
+    }).toList();
+
+    if (newStrokes.length != state.strokes.length) {
+       // We erased something! startStroke already pushed to undoHistory, so we just update the strokes.
+       state = state.copyWith(strokes: newStrokes);
+    } else {
+       // We erased nothing. Pop the undoHistory entry that startStroke added.
+       final newUndoHistory = List<List<Stroke>>.from(state.undoHistory);
+       if (newUndoHistory.isNotEmpty) {
+         newUndoHistory.removeLast();
+       }
+       state = state.copyWith(undoHistory: newUndoHistory);
+    }
+  }
+}

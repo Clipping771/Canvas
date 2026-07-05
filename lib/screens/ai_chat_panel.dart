@@ -136,6 +136,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       _isTyping = true;
       _cancelRequested = false;
     });
+    widget.onDrawStart?.call();
     drawingNotifier.setAiStatus('Thinking');
     
     CognitiveRuntime().avatarEngine.setState(AvatarState.thinking);
@@ -617,6 +618,9 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       }
       drawingNotifier.setAiStatus(null);
       CognitiveRuntime().avatarEngine.setState(AvatarState.idle);
+      if (mounted) {
+        widget.onDrawEnd?.call(null);
+      }
     }
   }
 
@@ -1459,15 +1463,50 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             final scale = inverse.getMaxScaleOnAxis();
 
             Offset p = rawP;
-            // Prevent stacking if AI generated multiple items at the exact same coordinate
-            if (lastRequestedPos != null && (rawP.dx - lastRequestedPos!.dx).abs() < 5 && (rawP.dy - lastRequestedPos!.dy).abs() < 5) {
-                p = Offset(lastPlacedPos!.dx + 550.0 * scale, lastPlacedPos!.dy);
-                if (p.dx > (targetTopLeft?.dx ?? mapPoint(100.0, 100.0).dx) + 1500.0 * scale) { // wrap to next row
-                   p = Offset(rawP.dx, lastPlacedPos!.dy + 550.0 * scale);
-                }
+            final currentStrokes = ref.read(drawingProvider).strokes;
+            final List<Rect> existingBounds = [];
+            for (var s in currentStrokes) {
+              if (s.points.isNotEmpty) {
+                existingBounds.add(s.bounds);
+              }
             }
-            lastRequestedPos = rawP;
-            lastPlacedPos = p;
+            for (var s in newStrokes) {
+              if (s.points.isNotEmpty) {
+                existingBounds.add(s.bounds);
+              }
+            }
+
+            double finalX = p.dx;
+            double finalY = p.dy;
+            double radius = 0;
+            double angle = 0;
+            bool hasCollision = true;
+
+            int iterations = 0;
+            while (hasCollision && iterations < 100) {
+              hasCollision = false;
+              Rect newBounds = Rect.fromCenter(
+                center: Offset(finalX, finalY),
+                width: 512.0 * scale + 40.0,
+                height: 512.0 * scale + 40.0,
+              );
+
+              for (var b in existingBounds) {
+                if (newBounds.overlaps(b)) {
+                  hasCollision = true;
+                  break;
+                }
+              }
+
+              if (hasCollision) {
+                radius += 20;
+                angle += 0.5; // spiral out
+                finalX = p.dx + radius * math.cos(angle);
+                finalY = p.dy + radius * math.sin(angle);
+              }
+              iterations++;
+            }
+            p = Offset(finalX, finalY);
 
             final seed = DateTime.now().millisecondsSinceEpoch;
             final url =
@@ -1630,7 +1669,6 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
 
     if (newStrokes.isNotEmpty || objectsAdded > 0) {
       drawingNotifier.setAiStatus(null);
-      widget.onDrawStart?.call();
     }
 
     if (newStrokes.isNotEmpty) {
@@ -1642,9 +1680,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
       }
     }
 
-    if (mounted && (newStrokes.isNotEmpty || objectsAdded > 0)) {
-      widget.onDrawEnd?.call(finalMaxY);
-    }
+    // onDrawEnd is now handled in the finally block of _sendMessage
 
     final summaryParts = <String>[];
     if (objectsAdded > 0) {

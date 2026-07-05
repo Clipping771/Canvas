@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/stroke.dart';
 import '../models/tool_type.dart';
-import '../engine/logic/wire_engine.dart';
+import '../engine/logic/tesla_engine.dart';
 import '../models/easter_egg_mode.dart';
 import '../models/canvas_environment.dart';
 import '../engine/particle_engine.dart';
@@ -654,7 +654,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
             final targetIndex = newStrokes.indexWhere((s) => s.id == targetStroke!.id);
             if (targetIndex != -1) newStrokes[targetIndex] = newTarget;
 
-            state = state.copyWith(strokes: WireEngine.updateWires(newStrokes));
+            state = state.copyWith(strokes: TeslaEngine.updateWires(newStrokes));
             _currentStroke = null;
             return;
           } else {
@@ -722,7 +722,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
     }
     
     // Simulate circuit logic and recalculate wires
-    state = state.copyWith(strokes: WireEngine.updateWires(state.strokes));
+    state = state.copyWith(strokes: TeslaEngine.updateWires(state.strokes));
     _currentStroke = null;
   }
 

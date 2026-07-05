@@ -627,8 +627,20 @@ class DrawingNotifier extends Notifier<DrawingState> {
         Stroke? targetStroke;
 
         for (var s in state.strokes.take(state.strokes.length - 1)) {
-          if (s.bounds.inflate(20).contains(startPoint)) sourceStroke = s;
-          if (s.bounds.inflate(20).contains(endPoint)) targetStroke = s;
+          bool isSourceHit = false;
+          bool isTargetHit = false;
+          
+          final comp = ComponentRegistry().createComponent(s);
+          if (comp != null && comp.pins.isNotEmpty) {
+            for (var pin in comp.pins) {
+              final pinPos = s.bounds.center + pin.relativePosition;
+              if ((pinPos - startPoint).distance < 40) isSourceHit = true;
+              if ((pinPos - endPoint).distance < 40) isTargetHit = true;
+            }
+          }
+          
+          if (isSourceHit || s.bounds.inflate(40).contains(startPoint)) sourceStroke = s;
+          if (isTargetHit || s.bounds.inflate(40).contains(endPoint)) targetStroke = s;
         }
 
         if (sourceStroke != null && targetStroke != null) {

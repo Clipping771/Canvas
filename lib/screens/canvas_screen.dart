@@ -186,7 +186,10 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
         ref.read(drawingProvider.notifier).placeText(result.trim(), canvasPosition);
       }
     }
-    controller.dispose();
+    // Delay dispose to prevent exception during dialog exit animation
+    Future.delayed(const Duration(milliseconds: 400), () {
+      controller.dispose();
+    });
   }
 
   void _handleAiTaskCompleted(CanvasEvent event) {

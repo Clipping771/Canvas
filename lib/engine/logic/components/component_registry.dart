@@ -1,5 +1,7 @@
 import '../../../../models/stroke.dart';
 import '../models/circuit_component.dart';
+import 'generic_component.dart';
+import 'dart:convert';
 
 typedef ComponentFactory = CircuitComponent Function(Stroke stroke);
 
@@ -12,6 +14,23 @@ class ComponentRegistry {
 
   void register(String keyword, ComponentFactory factory) {
     _factories[keyword.toLowerCase()] = factory;
+  }
+
+  void registerFromJson(String jsonString) {
+    try {
+      final Map<String, dynamic> data = jsonDecode(jsonString);
+      final definition = ComponentDefinition.fromJson(data);
+      final factory = (Stroke stroke) => GenericComponent(stroke, definition);
+      
+      // Register all aliases
+      for (var alias in definition.aliases) {
+        register(alias, factory);
+      }
+      // Register main name
+      register(definition.name, factory);
+    } catch (e) {
+      print('Failed to register plugin from JSON: $e');
+    }
   }
 
   CircuitComponent? createComponent(Stroke stroke) {

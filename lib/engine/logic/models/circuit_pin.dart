@@ -9,12 +9,22 @@ class CircuitPin {
   final PortDirection direction;
   final Offset relativePosition; // Offset relative to the component's center/bounds
   SignalState state;
+  String? nodeId; // The ID of the CircuitNode this pin is electrically connected to
+  bool isDigital;
 
   CircuitPin({
     required this.id,
     required this.name,
     required this.direction,
     required this.relativePosition,
+    this.isDigital = false,
     SignalState? state,
   }) : state = state ?? SignalState();
+
+  // Bridging Analog to Digital
+  void bridgeToDigital() {
+    if (isDigital) {
+      state.logic = state.voltage > 2.5 ? LogicState.high : LogicState.low;
+    }
+  }
 }

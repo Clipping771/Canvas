@@ -14,11 +14,14 @@ class Motor extends CircuitComponent {
   List<String> get aliases => ['Motor', 'Engine', 'Fan'];
 
   @override
-  Map<String, dynamic> get metadata => {'maxRpm': 3000.0, 'operatingVoltage': 9.0};
+  Map<String, dynamic> get metadata => {'maxRpm': 3000.0, 'operatingVoltage': 9.0, 'resistance': 100.0, 'maxPower': 2.0};
 
   late final List<CircuitPin> _pins;
   double _currentRpm = 0.0;
   bool _isOn = false;
+
+  @override
+  bool get isAnimated => _isOn && !isBurnedOut;
 
   Motor(Stroke stroke) : super(id: stroke.id, originalStroke: stroke) {
     double halfWidth = 50.0;
@@ -46,33 +49,39 @@ class Motor extends CircuitComponent {
   List<CircuitPin> get pins => _pins;
 
   @override
+  void applyMNA(dynamic solver) {
+    if (solver is! MNASolver) return;
+    double res = metadata['resistance'] as double;
+    double conductance = isBurnedOut ? 1.0 / 1e9 : 1.0 / res;
+    solver.addConductance(_pins[0].nodeId, _pins[1].nodeId, conductance);
+  }
+
+  @override
   void evaluate(SimulationTick tick) {
-    final inputVoltage = _pins[0].state.voltage;
+    super.evaluate(tick);
+    if (isBurnedOut) {
+      _isOn = false;
+      _currentRpm = 0.0;
+      return;
+    }
+    
+    // MNA voltage drop
+    double vDrop = (_pins[0].state.voltage - _pins[1].state.voltage).abs();
     final operatingVoltage = metadata['operatingVoltage'] as double;
     final maxRpm = metadata['maxRpm'] as double;
     
-    if (inputVoltage > 0) {
+    if (vDrop >= 1.0) { // arbitrary threshold to turn on
       _isOn = true;
-      // Calculate RPM based on voltage proportion
-      _currentRpm = (inputVoltage / operatingVoltage) * maxRpm;
-      if (_currentRpm > maxRpm) _currentRpm = maxRpm;
-      
-      // Motor drops voltage to ground usually if directly connected
-      _pins[1].state.voltage = 0.0;
-      _pins[1].state.logic = LogicState.low;
+      _currentRpm = (vDrop / operatingVoltage) * maxRpm;
     } else {
       _isOn = false;
       _currentRpm = 0.0;
-      _pins[1].state.logic = LogicState.low;
-      _pins[1].state.voltage = 0.0;
     }
   }
 
   @override
   Color getActiveColor() {
-    if (!_isOn) return Colors.grey;
-    // Map RPM to color brightness (faster = brighter cyan)
-    final ratio = _currentRpm / (metadata['maxRpm'] as double);
-    return Color.lerp(Colors.cyan.shade900, Colors.cyanAccent, ratio)!;
+    if (isBurnedOut) return Colors.black54;
+    return _isOn ? Colors.blue.shade400 : Colors.grey;
   }
 }

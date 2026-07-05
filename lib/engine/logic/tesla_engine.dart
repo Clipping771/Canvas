@@ -14,8 +14,15 @@ import 'components/led.dart';
 import 'components/logic_gates.dart';
 import 'components/clock.dart';
 import 'components/resistor.dart';
+import 'components/capacitor.dart';
+import 'components/inductor.dart';
+import 'components/oscilloscope.dart';
+import 'components/scriptable_chip.dart';
+import 'components/sub_circuit.dart';
 import 'components/motor.dart';
 import 'components/portal.dart';
+import 'core/circuit_node.dart';
+import 'core/mna_solver.dart';
 
 class TeslaEngine {
   static final TeslaEngine _instance = TeslaEngine._internal();
@@ -25,6 +32,7 @@ class TeslaEngine {
   }
 
   final Map<String, CircuitComponent> _activeComponents = {};
+  List<CircuitNode> _latestNodes = [];
 
   void _registerComponents() {
     final registry = ComponentRegistry();
@@ -41,11 +49,65 @@ class TeslaEngine {
     registry.register('clock', (s) => Clock(s));
     registry.register('oscillator', (s) => Clock(s));
     registry.register('resistor', (s) => Resistor(s));
+    registry.register('capacitor', (s) => Capacitor(s));
+    registry.register('inductor', (s) => Inductor(s));
+    registry.register('oscilloscope', (s) => Oscilloscope(s));
+    registry.register('mcu', (s) => ScriptableChip(s));
+    registry.register('chip', (s) => ScriptableChip(s));
+    registry.register('ic', (s) => SubCircuitComponent(s));
     registry.register('motor', (s) => Motor(s));
   }
 
   static List<Stroke> updateWires(List<Stroke> strokes) {
     return _instance._runSimulationPass(strokes);
+  }
+
+  // --- SPICE EXPORT ---
+  String generateSpiceNetlist() {
+    if (_latestNodes.isEmpty) return '* Empty Circuit';
+    
+    Map<String, int> nodeIdMap = {};
+    int nextId = 1;
+    
+    // Find all ground pins
+    final Set<String> groundPinIds = {};
+    for (var comp in _activeComponents.values) {
+      if (comp is Ground) {
+        for (var pin in comp.pins) {
+          groundPinIds.add(pin.id);
+        }
+      }
+    }
+    
+    // Assign SPICE node IDs. Ground MUST be 0.
+    for (var node in _latestNodes) {
+      if (node.connectedPins.any((p) => groundPinIds.contains(p.id))) {
+        nodeIdMap[node.id] = 0;
+      }
+    }
+    
+    for (var node in _latestNodes) {
+      if (!nodeIdMap.containsKey(node.id)) {
+        nodeIdMap[node.id] = nextId++;
+      }
+    }
+
+    StringBuffer sb = StringBuffer();
+    sb.writeln('* Notesketch Pro SPICE Export');
+    sb.writeln('* Generated from Canvas');
+    sb.writeln('');
+    
+    for (var comp in _activeComponents.values) {
+      // Ground doesn't have a SPICE entry, it just provides node 0
+      if (comp is Ground) continue; 
+      sb.writeln(comp.toSpice(nodeIdMap));
+    }
+    
+    sb.writeln('');
+    sb.writeln('.tran 0.1m 10m');
+    sb.writeln('.end');
+    
+    return sb.toString();
   }
 
   List<Stroke> _runSimulationPass(List<Stroke> strokes) {
@@ -96,7 +158,23 @@ class TeslaEngine {
     _activeComponents.clear();
     _activeComponents.addAll(nextComponents);
 
-    // Pass 2: Connect Pins via Wires
+    // Pass 2: Node Extraction
+    final List<CircuitNode> circuitNodes = [];
+    final Map<String, CircuitNode> pinToNode = {};
+
+    CircuitNode getNodeForPin(CircuitPin pin) {
+      if (pin.nodeId != null && pinToNode.containsKey(pin.nodeId!)) {
+        return pinToNode[pin.nodeId!]!;
+      }
+      final node = CircuitNode(id: 'node_${circuitNodes.length}');
+      node.addPin(pin);
+      pin.nodeId = node.id;
+      circuitNodes.add(node);
+      pinToNode[node.id] = node;
+      return node;
+    }
+
+    // Connect pins based on wires
     for (var stroke in strokes) {
       if (stroke.toolType == ToolType.wire) {
         final sourceId = stroke.customMetadata?['sourceId'] as String?;
@@ -104,74 +182,81 @@ class TeslaEngine {
         final sourcePinId = stroke.customMetadata?['sourcePinId'] as String?;
         final targetPinId = stroke.customMetadata?['targetPinId'] as String?;
         
-        if (sourceId != null && targetId != null) {
-          final sourceComp = _activeComponents[sourceId];
-          final targetComp = _activeComponents[targetId];
+        if (sourceId != null && targetId != null && _activeComponents.containsKey(sourceId) && _activeComponents.containsKey(targetId)) {
+          final sourceComp = _activeComponents[sourceId]!;
+          final targetComp = _activeComponents[targetId]!;
           
-          if (sourceComp != null && targetComp != null) {
-            final sourcePin = sourcePinId != null 
-                ? sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == sourcePinId, orElse: () => null)
-                : sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
-                
-            final targetPin = targetPinId != null 
-                ? targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == targetPinId, orElse: () => null)
-                : targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
-            
-            if (sourcePin != null && targetPin != null) {
-              targetPin.state = sourcePin.state.copyWith();
+          final sourcePin = sourcePinId != null 
+              ? sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == sourcePinId, orElse: () => null)
+              : sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
+              
+          final targetPin = targetPinId != null 
+              ? targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == targetPinId, orElse: () => null)
+              : targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
+          
+          if (sourcePin != null && targetPin != null) {
+            CircuitNode sourceNode = getNodeForPin(sourcePin);
+            CircuitNode targetNode = getNodeForPin(targetPin);
+
+            if (sourceNode.id != targetNode.id) {
+              // Merge targetNode into sourceNode
+              sourceNode.mergeWith(targetNode);
+              for (var p in targetNode.connectedPins) {
+                p.nodeId = sourceNode.id;
+              }
+              circuitNodes.remove(targetNode);
+              pinToNode.remove(targetNode.id);
             }
           }
         }
       }
     }
 
-    // Pass 3: Evaluate Components (Multiple passes to ensure propagation)
-    final tick = SimulationTick(tickCount: 0, deltaTimeSeconds: 0.16);
-    for (int i = 0; i < 3; i++) {
-      for (var component in _activeComponents.values) {
-        component.evaluate(tick);
-      }
-      
-      // Portal Transmission
-      for (var component in _activeComponents.values) {
-        if (component is PortalComponent) {
-          final destId = component.dynamicDestinationId ?? component.originalStroke.customMetadata?['destinationId'] as String?;
-          if (destId != null) {
-            final destComp = _activeComponents[destId];
-            if (destComp != null && destComp is PortalComponent) {
-              // Copy input pin state from this portal to the output pin of the destination portal
-              destComp.pins[1].state = component.pins[0].state.copyWith();
-            }
-          }
+    // Create a node for any unconnected pins
+    for (var comp in _activeComponents.values) {
+      for (var pin in comp.pins) {
+        if (pin.nodeId == null || !pinToNode.containsKey(pin.nodeId!)) {
+          getNodeForPin(pin);
         }
       }
+    }
+    
+    // Save latest nodes for probing/exporting
+    _latestNodes = circuitNodes;
 
-      // Re-propagate wires after evaluation
-      for (var stroke in strokes) {
-        if (stroke.toolType == ToolType.wire) {
-          final sourceId = stroke.customMetadata?['sourceId'] as String?;
-          final targetId = stroke.customMetadata?['targetId'] as String?;
-          final sourcePinId = stroke.customMetadata?['sourcePinId'] as String?;
-          final targetPinId = stroke.customMetadata?['targetPinId'] as String?;
-          
-          if (sourceId != null && targetId != null) {
-            final sourceComp = _activeComponents[sourceId];
-            final targetComp = _activeComponents[targetId];
-            if (sourceComp != null && targetComp != null) {
-              final sourcePin = sourcePinId != null 
-                  ? sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == sourcePinId, orElse: () => null)
-                  : sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
-                  
-              final targetPin = targetPinId != null 
-                  ? targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == targetPinId, orElse: () => null)
-                  : targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
-              if (sourcePin != null && targetPin != null) {
-                targetPin.state = sourcePin.state.copyWith();
-              }
-            }
+    // Pass 3: MNA Solver Execution
+    final solver = MNASolver(circuitNodes);
+    
+    // Step A: Register voltage sources
+    for (var comp in _activeComponents.values) {
+      if (comp is Ground) {
+        for (var pin in comp.pins) {
+          if (pin.nodeId != null) {
+            pinToNode[pin.nodeId!]!.isFixed = true; // Ground fixes node to 0V
           }
         }
+      } else {
+        comp.applyMNA(solver); // Pass 1
       }
+    }
+
+    // Step B: Init Matrices
+    solver.initMatrices();
+
+    // Step C: Stamp matrices
+    for (var comp in _activeComponents.values) {
+      if (comp is! Ground) {
+        comp.applyMNA(solver); // Pass 2
+      }
+    }
+
+    // Step D: Solve
+    solver.solve();
+
+    // Legacy evaluation pass (for UI colors, motor rotation, etc.)
+    final tick = SimulationTick(tickCount: 0, deltaTimeSeconds: 0.16);
+    for (var comp in _activeComponents.values) {
+      comp.evaluate(tick);
     }
 
     // Pass 4: Visual Updates & Bezier Wire Generation
@@ -180,10 +265,18 @@ class TeslaEngine {
       if (_activeComponents.containsKey(stroke.id)) {
         final comp = _activeComponents[stroke.id]!;
         final targetColor = comp.getActiveColor();
-        if (stroke.color != targetColor) {
+        Map<String, dynamic>? newMetadata = stroke.customMetadata;
+        
+        if (comp is Oscilloscope) {
+          newMetadata = Map.from(stroke.customMetadata ?? {});
+          newMetadata['history'] = List<double>.from(comp.voltageHistory);
+        }
+
+        if (stroke.color != targetColor || (comp is Oscilloscope)) {
           updatedStrokes.add(stroke.copyWith(
             color: targetColor,
             version: stroke.version + 1,
+            customMetadata: newMetadata,
           ));
           continue;
         }

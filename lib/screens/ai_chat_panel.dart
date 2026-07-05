@@ -911,6 +911,57 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
             }
           }
           continue;
+        } else if (type == 'generate_circuit') {
+          final components = action['components'] as List?;
+          final wires = action['wires'] as List?;
+          
+          if (components != null) {
+            for (var c in components) {
+              final pos = c['position'] as List;
+              final p = mapPoint(pos[0].toDouble(), pos[1].toDouble());
+              final id = c['id'] as String;
+              final compType = c['type'] as String;
+              
+              final stroke = Stroke(
+                id: id,
+                points: [p],
+                color: Colors.transparent, // component handles its own drawing
+                size: 40.0,
+                toolType: ToolType.text,
+                text: compType,
+                groupId: 'circuit_${DateTime.now().millisecondsSinceEpoch}',
+              );
+              newStrokes.add(stroke);
+            }
+          }
+          
+          if (wires != null) {
+            for (var w in wires) {
+              final source = w['source'] as String;
+              final target = w['target'] as String;
+              
+              // split c1_out to sourceId: "c1", pinId: "c1_out"
+              final sourceId = source.split('_')[0];
+              final targetId = target.split('_')[0];
+              
+              final stroke = Stroke(
+                points: [], // engine will generate bezier points automatically based on metadata
+                color: Colors.grey,
+                size: 4.0,
+                toolType: ToolType.wire,
+                customMetadata: {
+                  'sourceId': sourceId,
+                  'targetId': targetId,
+                  'sourcePinId': source,
+                  'targetPinId': target,
+                },
+                groupId: 'circuit_${DateTime.now().millisecondsSinceEpoch}',
+              );
+              newStrokes.add(stroke);
+            }
+          }
+          objectsUpdated++;
+          continue;
         } else if (type == 'apply_gravity') {
           final targetGroupId = action['targetGroupId'] as String?;
           

@@ -12,6 +12,7 @@ import '../models/canvas_environment.dart';
 import '../engine/canvas_widget.dart';
 import '../engine/spatial_layout_engine.dart';
 import '../engine/cognitive/cognitive_runtime.dart';
+import '../engine/logic/tesla_engine.dart';
 import '../engine/particle_engine.dart';
 import '../providers/drawing_provider.dart';
 import '../providers/notebook_provider.dart';
@@ -608,6 +609,8 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
             _dockIcon(icon: const Icon(CupertinoIcons.photo, size: 20), tooltip: 'Insert Image', onTap: _pickImage),
             _dockIcon(icon: const Icon(CupertinoIcons.doc_on_clipboard, size: 20), tooltip: 'Paste', onTap: _pasteSystemClipboard),
             _dockIcon(icon: const Icon(CupertinoIcons.share, size: 20), tooltip: 'UML', onTap: _showUmlDialog),
+            _dockIcon(icon: const Icon(CupertinoIcons.bolt_horizontal, size: 20), tooltip: 'SPICE', onTap: _showSpiceDialog),
+            Container(width: 1, height: 24, color: Colors.grey.withOpacity(0.2)),
             divider,
             _dockIcon(icon: const Icon(CupertinoIcons.arrow_uturn_left, size: 20), tooltip: 'Undo', onTap: () => ref.read(drawingProvider.notifier).undo()),
             _dockIcon(icon: const Icon(CupertinoIcons.arrow_uturn_right, size: 20), tooltip: 'Redo', onTap: () => ref.read(drawingProvider.notifier).redo()),
@@ -1311,6 +1314,36 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
           ],
         );
       }
+    );
+  }
+
+  void _showUmlDialog() {
+    final uml = ref.read(drawingProvider.notifier).generateUml();
+    _showCodeDialog('UML Export', uml);
+  }
+
+  void _showSpiceDialog() {
+    final spice = TeslaEngine().generateSpiceNetlist();
+    _showCodeDialog('SPICE Export', spice);
+  }
+
+  void _showCodeDialog(String title, String code) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: SelectableText(code, style: const TextStyle(fontFamily: 'monospace')),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 

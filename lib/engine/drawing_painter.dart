@@ -227,6 +227,34 @@ class DrawingCanvasPainter extends CustomPainter {
               ..strokeWidth = 1.5;
             canvas.drawCircle(pinPos, 6.0, borderPaint);
           }
+          
+          // Draw Oscilloscope Waveform
+          if (comp.name.toLowerCase() == 'oscilloscope' && stroke.customMetadata?.containsKey('history') == true) {
+            final history = (stroke.customMetadata!['history'] as List).cast<double>();
+            if (history.isNotEmpty) {
+              final wavePaint = Paint()
+                ..color = Colors.greenAccent
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 2.0;
+                
+              final path = Path();
+              final rect = stroke.bounds.inflate(20);
+              // We draw the wave above the text
+              final startX = rect.left;
+              final width = rect.width;
+              final baselineY = rect.top - 20;
+              
+              for (int i = 0; i < history.length; i++) {
+                final x = startX + (i / 100.0) * width; // Assuming max 100 frames
+                // Scale voltage: 1V = -5px (negative y is up)
+                final y = baselineY - (history[i] * 5.0);
+                
+                if (i == 0) path.moveTo(x, y);
+                else path.lineTo(x, y);
+              }
+              canvas.drawPath(path, wavePaint);
+            }
+          }
         }
         return;
       }

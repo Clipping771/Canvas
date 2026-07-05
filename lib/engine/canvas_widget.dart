@@ -13,6 +13,8 @@ import '../widgets/chemistry_widget.dart';
 import '../services/chemistry_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../engine/cognitive/cognitive_runtime.dart';
+import 'logic/tesla_engine.dart';
+
 class CanvasWidget extends ConsumerStatefulWidget {
   const CanvasWidget({super.key});
 
@@ -74,9 +76,10 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
       boundaryMargin: const EdgeInsets.all(double.infinity),
       child: GestureDetector(
         onTapUp: (details) {
+          final tapPos = details.localPosition;
+          
           // Text tool: tap to place text at that canvas position
           if (drawingState.currentTool == ToolType.text) {
-            final tapPos = details.localPosition;
             Stroke? hitStroke;
             try {
               hitStroke = drawingState.strokes.reversed.firstWhere(
@@ -84,6 +87,29 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
               );
             } catch (_) {}
             notifier.requestTextAt(tapPos, existingStroke: hitStroke);
+          } 
+          // Pan tool: Use as a Probe to check voltages/currents
+          else if (drawingState.currentTool == ToolType.pan) {
+            Stroke? hitStroke;
+            // 1. Check components
+            try {
+              hitStroke = drawingState.strokes.reversed.firstWhere(
+                (s) => s.toolType != ToolType.wire && s.bounds.inflate(10).contains(tapPos)
+              );
+            } catch (_) {}
+            
+            // 2. Check wires if no component hit
+            if (hitStroke == null) {
+              try {
+                hitStroke = drawingState.strokes.reversed.firstWhere(
+                  (s) => s.toolType == ToolType.wire && s.bounds.inflate(20).contains(tapPos)
+                );
+              } catch (_) {}
+            }
+
+            if (hitStroke != null) {
+              _showProbeDialog(context, hitStroke);
+            }
           }
         },
         onPanStart: (drawingState.currentTool == ToolType.pan ||
@@ -397,6 +423,61 @@ class AiStatusOverlay extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+  void _showProbeDialog(BuildContext context, Stroke stroke) {
+    final activeComps = TeslaEngine().activeComponents;
+    final comp = activeComps[stroke.id];
+    
+    String info = '';
+    
+    if (stroke.toolType == ToolType.wire) {
+      final sourcePinId = stroke.customMetadata?['sourcePinId'] as String?;
+      final targetPinId = stroke.customMetadata?['targetPinId'] as String?;
+      
+      double? v;
+      if (targetPinId != null) {
+        final targetCompId = stroke.customMetadata?['targetId'] as String?;
+        if (targetCompId != null && activeComps.containsKey(targetCompId)) {
+          final tComp = activeComps[targetCompId]!;
+          try {
+            final pin = tComp.pins.firstWhere((p) => p.id == targetPinId);
+            v = pin.state.voltage;
+          } catch (_) {}
+        }
+      }
+      
+      info = 'Wire\\nVoltage: ${v?.toStringAsFixed(2) ?? '0.00'} V';
+    } else if (comp != null) {
+      info = '${comp.name}\\n';
+      if (comp.metadata.containsKey('resistance')) {
+        info += 'Resistance: ${comp.metadata['resistance']} Ω\\n';
+      }
+      if (comp.metadata.containsKey('voltage')) {
+        info += 'Rating: ${comp.metadata['voltage']} V\\n';
+      }
+      for (var pin in comp.pins) {
+        info += 'Pin ${pin.name}: ${pin.state.voltage.toStringAsFixed(2)} V\\n';
+      }
+    } else {
+      info = 'Unknown Component';
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Probe Data', style: TextStyle(color: Colors.blueAccent)),
+          backgroundColor: const Color(0xFF1E1E2C),
+          content: Text(info, style: const TextStyle(color: Colors.white, fontSize: 16)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            )
+          ],
+        );
+      },
     );
   }
 }

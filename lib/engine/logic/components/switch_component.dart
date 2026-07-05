@@ -5,6 +5,7 @@ import '../models/circuit_pin.dart';
 import '../models/logic_state.dart';
 import '../models/signal_state.dart';
 import '../core/simulation_tick.dart';
+import '../core/mna_solver.dart';
 
 class SwitchComponent extends CircuitComponent {
   @override
@@ -48,6 +49,15 @@ class SwitchComponent extends CircuitComponent {
 
   @override
   List<CircuitPin> get pins => _pins;
+
+  @override
+  void applyMNA(dynamic solver) {
+    if (solver is! MNASolver) return;
+    if (_isOn) {
+      // 0.001 Ohms when ON (ideal wire)
+      solver.addConductance(_pins[0].nodeId, _pins[1].nodeId, 1.0 / 0.001);
+    }
+  }
 
   @override
   void evaluate(SimulationTick tick) {

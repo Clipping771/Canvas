@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/ai_provider.dart';
@@ -11,6 +13,8 @@ class SettingsState {
   final String selectedFont;
   final String responseFormat;
   final bool enableKeyboardShortcuts;
+  final List<String> availableModels;
+  final bool isFetchingModels;
 
   SettingsState({
     this.apiKeys = const {},
@@ -19,6 +23,8 @@ class SettingsState {
     this.selectedFont = 'Inter',
     this.responseFormat = 'Default',
     this.enableKeyboardShortcuts = true,
+    this.availableModels = const ['gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+    this.isFetchingModels = false,
   });
 
   SettingsState copyWith({
@@ -28,6 +34,8 @@ class SettingsState {
     String? selectedFont,
     String? responseFormat,
     bool? enableKeyboardShortcuts,
+    List<String>? availableModels,
+    bool? isFetchingModels,
   }) {
     return SettingsState(
       apiKeys: apiKeys ?? this.apiKeys,
@@ -36,6 +44,8 @@ class SettingsState {
       selectedFont: selectedFont ?? this.selectedFont,
       responseFormat: responseFormat ?? this.responseFormat,
       enableKeyboardShortcuts: enableKeyboardShortcuts ?? this.enableKeyboardShortcuts,
+      availableModels: availableModels ?? this.availableModels,
+      isFetchingModels: isFetchingModels ?? this.isFetchingModels,
     );
   }
 }
@@ -85,6 +95,11 @@ class SettingsNotifier extends Notifier<SettingsState> {
       responseFormat: savedResponseFormat,
       enableKeyboardShortcuts: savedShortcuts,
     );
+    
+    // Fetch models if we have an API key for the selected provider
+    if (keys[savedProvider] != null) {
+      _fetchModels(savedProvider, keys[savedProvider]!);
+    }
   }
 
   Future<void> saveApiKey(AiProvider provider, String key) async {
@@ -99,12 +114,56 @@ class SettingsNotifier extends Notifier<SettingsState> {
     }
 
     state = state.copyWith(apiKeys: newKeys);
+    
+    // If we just saved a key for the current provider, fetch models
+    if (provider == state.selectedProvider && key.isNotEmpty) {
+      await _fetchModels(provider, key);
+    }
+  }
+
+  Future<void> _fetchModels(AiProvider provider, String apiKey) async {
+    if (provider != AiProvider.gemini) return;
+    
+    state = state.copyWith(isFetchingModels: true);
+    try {
+      final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey');
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final models = (data['models'] as List)
+            .map((m) => m['name'] as String)
+            .where((name) => name.contains('gemini'))
+            .map((name) => name.replaceAll('models/', ''))
+            .toList();
+        
+        if (models.isNotEmpty) {
+          state = state.copyWith(
+            availableModels: models,
+            isFetchingModels: false,
+          );
+          return;
+        }
+      }
+    } catch (e) {
+      print('Error fetching models: $e');
+    }
+    
+    // Fallback if fetch fails
+    state = state.copyWith(
+      isFetchingModels: false,
+      availableModels: ['gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+    );
   }
 
   Future<void> setProvider(AiProvider provider) async {
     final prefs = await _getPrefs();
     await prefs.setString('selected_provider', provider.name);
     state = state.copyWith(selectedProvider: provider);
+    
+    // Fetch models if switching to gemini and we have a key
+    if (provider == AiProvider.gemini && state.apiKeys[provider] != null) {
+      await _fetchModels(provider, state.apiKeys[provider]!);
+    }
   }
 
   Future<void> setModel(String modelId) async {

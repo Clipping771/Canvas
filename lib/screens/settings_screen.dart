@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/ai_provider.dart';
 import '../providers/settings_provider.dart';
@@ -185,13 +185,48 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           fontSize: 16,
                         ),
                       ),
-                      Text(
-                        subtitle,
-                        style: const TextStyle(
-                          color: Color(0xFF8B9EB7),
-                          fontSize: 13,
+                      if (isActive && provider == AiProvider.gemini)
+                        state.isFetchingModels 
+                          ? const Padding(
+                              padding: EdgeInsets.only(top: 4.0),
+                              child: SizedBox(
+                                height: 12, 
+                                width: 12, 
+                                child: CircularProgressIndicator(strokeWidth: 2)
+                              ),
+                            )
+                          : DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: state.availableModels.contains(state.selectedModel) 
+                                    ? state.selectedModel 
+                                    : (state.availableModels.isNotEmpty ? state.availableModels.first : 'gemini-2.5-pro'),
+                                isDense: true,
+                                iconSize: 16,
+                                style: const TextStyle(
+                                  color: Color(0xFF8B9EB7),
+                                  fontSize: 13,
+                                ),
+                                onChanged: (String? newValue) {
+                                  if (newValue != null) {
+                                    ref.read(settingsProvider.notifier).setModel(newValue);
+                                  }
+                                },
+                                items: state.availableModels.map<DropdownMenuItem<String>>((String value) {
+                                  return DropdownMenuItem<String>(
+                                    value: value,
+                                    child: Text(value),
+                                  );
+                                }).toList(),
+                              ),
+                            )
+                      else
+                        Text(
+                          subtitle,
+                          style: const TextStyle(
+                            color: Color(0xFF8B9EB7),
+                            fontSize: 13,
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),

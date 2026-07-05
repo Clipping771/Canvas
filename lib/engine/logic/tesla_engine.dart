@@ -48,17 +48,26 @@ class TeslaEngine {
   }
 
   List<Stroke> _runSimulationPass(List<Stroke> strokes) {
-    _activeComponents.clear();
+    final Map<String, CircuitComponent> nextComponents = {};
     
     // Pass 1: Build graph nodes (Components)
     for (var stroke in strokes) {
       if (stroke.toolType == ToolType.text) {
-        final component = ComponentRegistry().createComponent(stroke);
-        if (component != null) {
-          _activeComponents[stroke.id] = component;
+        final existing = _activeComponents[stroke.id];
+        if (existing != null && 
+            existing.originalStroke.text == stroke.text &&
+            existing.originalStroke.size == stroke.size) {
+           nextComponents[stroke.id] = existing;
+        } else {
+           final component = ComponentRegistry().createComponent(stroke);
+           if (component != null) {
+             nextComponents[stroke.id] = component;
+           }
         }
       }
     }
+    _activeComponents.clear();
+    _activeComponents.addAll(nextComponents);
 
     // Pass 2: Connect Pins via Wires
     for (var stroke in strokes) {

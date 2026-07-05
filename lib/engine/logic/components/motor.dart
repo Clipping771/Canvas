@@ -21,18 +21,23 @@ class Motor extends CircuitComponent {
   bool _isOn = false;
 
   Motor(Stroke stroke) : super(id: stroke.id, originalStroke: stroke) {
+    double halfWidth = 50.0;
+    if (stroke.text != null) {
+      halfWidth = (stroke.text!.length * (stroke.size * 0.6)) / 2.0 + 10.0;
+    }
+
     _pins = [
       CircuitPin(
         id: '${id}_in',
-        name: '+',
+        name: 'IN',
         direction: PortDirection.input,
-        relativePosition: const Offset(-50, 0),
+        relativePosition: Offset(-halfWidth, 0),
       ),
       CircuitPin(
         id: '${id}_out',
         name: '-',
         direction: PortDirection.output,
-        relativePosition: const Offset(50, 0),
+        relativePosition: Offset(halfWidth, 0),
       ),
     ];
   }

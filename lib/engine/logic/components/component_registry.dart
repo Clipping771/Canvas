@@ -18,9 +18,10 @@ class ComponentRegistry {
     if (stroke.text == null) return null;
     final text = stroke.text!.toLowerCase();
     
-    // Check for exact matches or containing matches
+    // Check for exact word matches to avoid "resistor" triggering "or"
+    final words = text.split(RegExp(r'\s+'));
     for (var entry in _factories.entries) {
-      if (text.contains(entry.key)) {
+      if (words.contains(entry.key) || text.startsWith(entry.key + ' ')) {
         return entry.value(stroke);
       }
     }

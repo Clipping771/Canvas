@@ -1897,7 +1897,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
                       color: AppColors.primary,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(Icons.brush, color: Colors.white, size: 22),
+                    child: Icon(Icons.palette, color: Colors.white, size: 22),
                   ),
                   const SizedBox(width: 12),
                   // Title + subtitle
@@ -2244,7 +2244,7 @@ class _AiChatPanelState extends ConsumerState<AiChatPanel> {
         color: AppColors.primary,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Icon(Icons.brush, color: Colors.white, size: 14),
+      child: Icon(Icons.palette, color: Colors.white, size: 14),
     );
   }
 }

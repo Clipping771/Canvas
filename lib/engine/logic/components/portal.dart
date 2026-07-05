@@ -18,6 +18,7 @@ class PortalComponent extends CircuitComponent {
 
   late final List<CircuitPin> _pins;
   bool _isOn = false;
+  String? dynamicDestinationId;
 
   PortalComponent(Stroke stroke) : super(id: stroke.id, originalStroke: stroke) {
     _pins = [

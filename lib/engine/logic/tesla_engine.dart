@@ -50,6 +50,7 @@ class TeslaEngine {
 
   List<Stroke> _runSimulationPass(List<Stroke> strokes) {
     final Map<String, CircuitComponent> nextComponents = {};
+    final List<PortalComponent> unlinkedPortals = [];
     
     // Pass 1: Build graph nodes (Components)
     for (var stroke in strokes) {
@@ -67,14 +68,31 @@ class TeslaEngine {
         }
       } else if (stroke.toolType == ToolType.portal) {
         final existing = _activeComponents[stroke.id];
+        PortalComponent portalComp;
         if (existing != null && 
             existing.originalStroke.customMetadata?['destinationId'] == stroke.customMetadata?['destinationId']) {
-           nextComponents[stroke.id] = existing;
+           portalComp = existing as PortalComponent;
+           nextComponents[stroke.id] = portalComp;
         } else {
-           nextComponents[stroke.id] = PortalComponent(stroke);
+           portalComp = PortalComponent(stroke);
+           nextComponents[stroke.id] = portalComp;
+        }
+        
+        if (portalComp.originalStroke.customMetadata?['destinationId'] == null) {
+           unlinkedPortals.add(portalComp);
         }
       }
     }
+    
+    // Auto-link unlinked portals in pairs
+    for (var p in unlinkedPortals) {
+      p.dynamicDestinationId = null;
+    }
+    for (int i = 0; i < unlinkedPortals.length - 1; i += 2) {
+      unlinkedPortals[i].dynamicDestinationId = unlinkedPortals[i+1].id;
+      unlinkedPortals[i+1].dynamicDestinationId = unlinkedPortals[i].id;
+    }
+    
     _activeComponents.clear();
     _activeComponents.addAll(nextComponents);
 
@@ -117,7 +135,7 @@ class TeslaEngine {
       // Portal Transmission
       for (var component in _activeComponents.values) {
         if (component is PortalComponent) {
-          final destId = component.originalStroke.customMetadata?['destinationId'] as String?;
+          final destId = component.dynamicDestinationId ?? component.originalStroke.customMetadata?['destinationId'] as String?;
           if (destId != null) {
             final destComp = _activeComponents[destId];
             if (destComp != null && destComp is PortalComponent) {

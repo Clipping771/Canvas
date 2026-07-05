@@ -50,14 +50,54 @@ class TeslaEngine {
       }
     }
 
-    // Pass 2: Connect Pins via Wires (To be fully implemented with pin-based hit testing)
-    // For now, if a wire connects components, we assume it connects their first available input/output.
-    // This will be replaced with precise sourcePinId / targetPinId logic.
+    // Pass 2: Connect Pins via Wires (Fallback to first available input/output if pin ID is missing)
+    for (var stroke in strokes) {
+      if (stroke.toolType == ToolType.wire) {
+        final sourceId = stroke.customMetadata?['sourceId'] as String?;
+        final targetId = stroke.customMetadata?['targetId'] as String?;
+        
+        if (sourceId != null && targetId != null) {
+          final sourceComp = _activeComponents[sourceId];
+          final targetComp = _activeComponents[targetId];
+          
+          if (sourceComp != null && targetComp != null) {
+            // Find first output pin of source and first input pin of target
+            final sourcePin = sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
+            final targetPin = targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
+            
+            if (sourcePin != null && targetPin != null) {
+              targetPin.state = sourcePin.state.copyWith();
+            }
+          }
+        }
+      }
+    }
 
-    // Pass 3: Evaluate Components
+    // Pass 3: Evaluate Components (Multiple passes to ensure propagation)
     final tick = SimulationTick(tickCount: 0, deltaTimeSeconds: 0.16);
-    for (var component in _activeComponents.values) {
-      component.evaluate(tick);
+    for (int i = 0; i < 3; i++) {
+      for (var component in _activeComponents.values) {
+        component.evaluate(tick);
+      }
+      
+      // Re-propagate wires after evaluation
+      for (var stroke in strokes) {
+        if (stroke.toolType == ToolType.wire) {
+          final sourceId = stroke.customMetadata?['sourceId'] as String?;
+          final targetId = stroke.customMetadata?['targetId'] as String?;
+          if (sourceId != null && targetId != null) {
+            final sourceComp = _activeComponents[sourceId];
+            final targetComp = _activeComponents[targetId];
+            if (sourceComp != null && targetComp != null) {
+              final sourcePin = sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
+              final targetPin = targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
+              if (sourcePin != null && targetPin != null) {
+                targetPin.state = sourcePin.state.copyWith();
+              }
+            }
+          }
+        }
+      }
     }
 
     // Pass 4: Visual Updates
@@ -72,6 +112,29 @@ class TeslaEngine {
             version: stroke.version + 1,
           ));
           continue;
+        }
+      } else if (stroke.toolType == ToolType.wire) {
+        final sourceId = stroke.customMetadata?['sourceId'] as String?;
+        if (sourceId != null && _activeComponents.containsKey(sourceId)) {
+          final sourceComp = _activeComponents[sourceId]!;
+          final sourcePin = sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
+          if (sourcePin != null && (sourcePin.state.logic == LogicState.high || sourcePin.state.voltage > 0)) {
+            if (stroke.color != Colors.orange) {
+              updatedStrokes.add(stroke.copyWith(
+                color: Colors.orange,
+                version: stroke.version + 1,
+              ));
+              continue;
+            }
+          } else {
+             if (stroke.color != Colors.grey) {
+              updatedStrokes.add(stroke.copyWith(
+                color: Colors.grey,
+                version: stroke.version + 1,
+              ));
+              continue;
+            }
+          }
         }
       }
       updatedStrokes.add(stroke);

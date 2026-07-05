@@ -1317,12 +1317,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     );
   }
 
-  void _showUmlDialog() {
-    final uml = ref.read(drawingProvider.notifier).generateUml();
-    _showCodeDialog('UML Export', uml);
-  }
 
-  void _showSpiceDialog() {
     final spice = TeslaEngine().generateSpiceNetlist();
     _showCodeDialog('SPICE Export', spice);
   }

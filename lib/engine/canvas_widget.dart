@@ -370,61 +370,6 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget> {
       ),
     );
   }
-}
-
-class AiStatusOverlay extends StatelessWidget {
-  final String status;
-  final Color textColor;
-  const AiStatusOverlay({super.key, required this.status, required this.textColor});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: textColor == Colors.black ? Colors.white : Colors.black87,
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedShimmerText(
-            text: status,
-            textColor: textColor,
-            style: GoogleFonts.nanumPenScript(
-              textStyle: const TextStyle(fontSize: 28),
-            ),
-          ),
-          AnimatedDots(textColor: textColor),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () {
-              EventBus().publish(EventType.cancelGeneration);
-            },
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.stop,
-                color: Colors.white,
-                size: 16,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
   void _showProbeDialog(BuildContext context, Stroke stroke) {
     final activeComps = TeslaEngine().activeComponents;
     final comp = activeComps[stroke.id];
@@ -480,6 +425,62 @@ class AiStatusOverlay extends StatelessWidget {
       },
     );
   }
+}
+
+class AiStatusOverlay extends StatelessWidget {
+  final String status;
+  final Color textColor;
+  const AiStatusOverlay({super.key, required this.status, required this.textColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: textColor == Colors.black ? Colors.white : Colors.black87,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedShimmerText(
+            text: status,
+            textColor: textColor,
+            style: GoogleFonts.nanumPenScript(
+              textStyle: const TextStyle(fontSize: 28),
+            ),
+          ),
+          AnimatedDots(textColor: textColor),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () {
+              EventBus().publish(EventType.cancelGeneration);
+            },
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.stop,
+                color: Colors.white,
+                size: 16,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 }
 
 class AnimatedDots extends StatefulWidget {

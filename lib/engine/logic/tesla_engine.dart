@@ -32,6 +32,7 @@ class TeslaEngine {
   }
 
   final Map<String, CircuitComponent> _activeComponents = {};
+  Map<String, CircuitComponent> get activeComponents => _activeComponents;
   List<CircuitNode> _latestNodes = [];
 
   void _registerComponents() {

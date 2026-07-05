@@ -1,5 +1,6 @@
 import 'circuit_node.dart';
 import 'matrix_solver.dart';
+import '../models/logic_state.dart';
 
 class VoltageSource {
   final CircuitNode? posNode;

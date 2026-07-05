@@ -5,6 +5,7 @@ import '../models/circuit_pin.dart';
 import '../models/logic_state.dart';
 import '../models/signal_state.dart';
 import '../core/simulation_tick.dart';
+import '../core/mna_solver.dart';
 
 class Motor extends CircuitComponent {
   @override

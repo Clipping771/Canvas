@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'signal_state.dart';
+import 'logic_state.dart';
 
 enum PortDirection { input, output, bidirectional }
 

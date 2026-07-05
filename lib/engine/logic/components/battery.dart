@@ -19,12 +19,17 @@ class Battery extends CircuitComponent {
   late final List<CircuitPin> _pins;
 
   Battery(Stroke stroke) : super(id: stroke.id, originalStroke: stroke) {
+    double halfWidth = 50.0;
+    if (stroke.text != null) {
+      halfWidth = (stroke.text!.length * (stroke.size * 0.6)) / 2.0 + 10.0;
+    }
+
     _pins = [
       CircuitPin(
         id: '${id}_out',
         name: '+',
         direction: PortDirection.output,
-        relativePosition: const Offset(50, 0),
+        relativePosition: Offset(halfWidth, 0),
         state: SignalState(logic: LogicState.high, voltage: 9.0),
       )
     ];

@@ -23,18 +23,25 @@ class SwitchComponent extends CircuitComponent {
     if (stroke.text != null && stroke.text!.toLowerCase().contains('on')) {
       _isOn = true;
     }
+    double halfWidth = 50.0;
+    if (stroke.text != null) {
+      // Estimate width based on character count and font size (stroke.size)
+      // Average char width is roughly 0.6 * fontSize.
+      halfWidth = (stroke.text!.length * (stroke.size * 0.6)) / 2.0 + 10.0;
+    }
+
     _pins = [
       CircuitPin(
         id: '${id}_in',
         name: 'IN',
         direction: PortDirection.input,
-        relativePosition: const Offset(-50, 0),
+        relativePosition: Offset(-halfWidth, 0),
       ),
       CircuitPin(
         id: '${id}_out',
         name: 'OUT',
         direction: PortDirection.output,
-        relativePosition: const Offset(50, 0),
+        relativePosition: Offset(halfWidth, 0),
       ),
     ];
   }

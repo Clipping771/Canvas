@@ -20,24 +20,29 @@ class AndGate extends CircuitComponent {
   bool _isOn = false;
 
   AndGate(Stroke stroke) : super(id: stroke.id, originalStroke: stroke) {
+    double halfWidth = 50.0;
+    if (stroke.text != null) {
+      halfWidth = (stroke.text!.length * (stroke.size * 0.6)) / 2.0 + 10.0;
+    }
+
     _pins = [
       CircuitPin(
         id: '${id}_in1',
         name: 'A',
         direction: PortDirection.input,
-        relativePosition: const Offset(-50, -20),
+        relativePosition: Offset(-halfWidth, -20),
       ),
       CircuitPin(
         id: '${id}_in2',
         name: 'B',
         direction: PortDirection.input,
-        relativePosition: const Offset(-50, 20),
+        relativePosition: Offset(-halfWidth, 20),
       ),
       CircuitPin(
         id: '${id}_out',
         name: 'OUT',
         direction: PortDirection.output,
-        relativePosition: const Offset(50, 0),
+        relativePosition: Offset(halfWidth, 0),
       ),
     ];
   }
@@ -79,24 +84,29 @@ class OrGate extends CircuitComponent {
   bool _isOn = false;
 
   OrGate(Stroke stroke) : super(id: stroke.id, originalStroke: stroke) {
+    double halfWidth = 50.0;
+    if (stroke.text != null) {
+      halfWidth = (stroke.text!.length * (stroke.size * 0.6)) / 2.0 + 10.0;
+    }
+
     _pins = [
       CircuitPin(
         id: '${id}_in1',
         name: 'A',
         direction: PortDirection.input,
-        relativePosition: const Offset(-50, -20),
+        relativePosition: Offset(-halfWidth, -20),
       ),
       CircuitPin(
         id: '${id}_in2',
         name: 'B',
         direction: PortDirection.input,
-        relativePosition: const Offset(-50, 20),
+        relativePosition: Offset(-halfWidth, 20),
       ),
       CircuitPin(
         id: '${id}_out',
         name: 'OUT',
         direction: PortDirection.output,
-        relativePosition: const Offset(50, 0),
+        relativePosition: Offset(halfWidth, 0),
       ),
     ];
   }
@@ -138,18 +148,23 @@ class NotGate extends CircuitComponent {
   bool _isOn = false;
 
   NotGate(Stroke stroke) : super(id: stroke.id, originalStroke: stroke) {
+    double halfWidth = 50.0;
+    if (stroke.text != null) {
+      halfWidth = (stroke.text!.length * (stroke.size * 0.6)) / 2.0 + 10.0;
+    }
+
     _pins = [
       CircuitPin(
         id: '${id}_in',
         name: 'IN',
         direction: PortDirection.input,
-        relativePosition: const Offset(-50, 0),
+        relativePosition: Offset(-halfWidth, 0),
       ),
       CircuitPin(
         id: '${id}_out',
         name: 'OUT',
         direction: PortDirection.output,
-        relativePosition: const Offset(50, 0),
+        relativePosition: Offset(halfWidth, 0),
       ),
     ];
   }

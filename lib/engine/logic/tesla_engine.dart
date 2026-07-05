@@ -15,6 +15,7 @@ import 'components/logic_gates.dart';
 import 'components/clock.dart';
 import 'components/resistor.dart';
 import 'components/motor.dart';
+import 'components/portal.dart';
 
 class TeslaEngine {
   static final TeslaEngine _instance = TeslaEngine._internal();
@@ -64,6 +65,14 @@ class TeslaEngine {
              nextComponents[stroke.id] = component;
            }
         }
+      } else if (stroke.toolType == ToolType.portal) {
+        final existing = _activeComponents[stroke.id];
+        if (existing != null && 
+            existing.originalStroke.customMetadata?['destinationId'] == stroke.customMetadata?['destinationId']) {
+           nextComponents[stroke.id] = existing;
+        } else {
+           nextComponents[stroke.id] = PortalComponent(stroke);
+        }
       }
     }
     _activeComponents.clear();
@@ -105,6 +114,20 @@ class TeslaEngine {
         component.evaluate(tick);
       }
       
+      // Portal Transmission
+      for (var component in _activeComponents.values) {
+        if (component is PortalComponent) {
+          final destId = component.originalStroke.customMetadata?['destinationId'] as String?;
+          if (destId != null) {
+            final destComp = _activeComponents[destId];
+            if (destComp != null && destComp is PortalComponent) {
+              // Copy input pin state from this portal to the output pin of the destination portal
+              destComp.pins[1].state = component.pins[0].state.copyWith();
+            }
+          }
+        }
+      }
+
       // Re-propagate wires after evaluation
       for (var stroke in strokes) {
         if (stroke.toolType == ToolType.wire) {

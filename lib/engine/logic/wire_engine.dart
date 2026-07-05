@@ -84,13 +84,13 @@ class WireEngine {
       }
     }
 
-    // Auto-link if exactly two portals exist and they aren't explicitly linked
+    // Auto-link ALL portals together into a single global network
     final allPortals = strokes.where((s) => s.toolType == ToolType.portal).toList();
-    if (allPortals.length == 2) {
-      final p1 = allPortals[0];
-      final p2 = allPortals[1];
-      graph[p1.id]?.add(p2.id);
-      graph[p2.id]?.add(p1.id);
+    for (int i = 0; i < allPortals.length; i++) {
+      for (int j = i + 1; j < allPortals.length; j++) {
+        graph[allPortals[i].id]?.add(allPortals[j].id);
+        graph[allPortals[j].id]?.add(allPortals[i].id);
+      }
     }
 
     // Find components
@@ -118,22 +118,32 @@ class WireEngine {
       }
     }
 
-    // Apply circuit logic: If a component has "Battery" (case-insensitive), all "Light" strokes in it turn yellow
+    // Apply circuit logic
     final List<Stroke> simulatedStrokes = [];
     for (var s in strokes) {
-      if (s.toolType == ToolType.text && s.text != null && s.text!.toLowerCase() == 'light') {
+      if (s.toolType == ToolType.text && s.text != null && s.text!.toLowerCase().contains('light')) {
         // Find component containing this light
         final component = components.firstWhere((c) => c.contains(s.id), orElse: () => {});
         bool hasPower = false;
+        bool switchIsBlocking = false;
+
         for (var id in component) {
           final compStroke = strokeMap[id];
-          if (compStroke != null && compStroke.toolType == ToolType.text && compStroke.text != null && compStroke.text!.toLowerCase() == 'battery') {
-            hasPower = true;
-            break;
+          if (compStroke != null && compStroke.toolType == ToolType.text && compStroke.text != null) {
+            final textLower = compStroke.text!.toLowerCase();
+            if (textLower.contains('battery')) {
+              hasPower = true;
+            }
+            if (textLower.contains('switch')) {
+              // If there's a switch, it must explicitly say "on" to allow power
+              if (!textLower.contains('on')) {
+                switchIsBlocking = true;
+              }
+            }
           }
         }
 
-        final targetColor = hasPower ? Colors.yellow.shade600 : Colors.grey;
+        final targetColor = (hasPower && !switchIsBlocking) ? Colors.yellow.shade600 : Colors.grey;
         if (s.color != targetColor) {
            simulatedStrokes.add(Stroke(
               id: s.id,

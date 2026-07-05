@@ -175,7 +175,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
     if (result != null) {
       if (existingStroke != null) {
         if (result.trim().isEmpty) {
-          ref.read(drawingProvider.notifier).removeStroke(existingStroke.id);
+          ref.read(drawingProvider.notifier).deleteStroke(existingStroke.id);
         } else {
           ref.read(drawingProvider.notifier).updateStrokeById(
             existingStroke.id,

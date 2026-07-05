@@ -1416,6 +1416,12 @@ class DrawingNotifier extends Notifier<DrawingState> {
     addStrokes([stroke]);
   }
 
+  void deleteStroke(String id) {
+    state = state.copyWith(
+      strokes: state.strokes.where((s) => s.id != id).toList()
+    );
+  }
+
   void setColor(Color color) {
     state = state.copyWith(currentColor: color);
   }

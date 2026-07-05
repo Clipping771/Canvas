@@ -608,11 +608,9 @@ class DrawingNotifier extends Notifier<DrawingState> {
       }
       
       if (state.currentTool == ToolType.eraser) {
-        // 1. Remove the eraser stroke itself from the canvas
-        final newStrokesWithoutEraser = List<Stroke>.from(state.strokes)..removeLast();
-        state = state.copyWith(strokes: newStrokesWithoutEraser);
-        
-        // 2. Erase the strokes it intersects with
+        // For a pixel eraser (like Photoshop), we MUST keep the eraser stroke itself
+        // on the canvas so it can be rendered with BlendMode.clear.
+        // We only delete intersecting widgets.
         _executeWidgetErasure();
         
         _currentStroke = null;
@@ -1526,32 +1524,11 @@ class DrawingNotifier extends Notifier<DrawingState> {
         return false;
       }
       
-      // For drawing strokes, do a fine-grained point intersection
-      final combinedRadius = eraserRadius + stroke.size;
-      final combinedRadiusSq = combinedRadius * combinedRadius;
-      
-      for (var sp in stroke.points) {
-        for (var ep in eraserPoints) {
-          final distSq = (sp.dx - ep.dx)*(sp.dx - ep.dx) + (sp.dy - ep.dy)*(sp.dy - ep.dy);
-          if (distSq <= combinedRadiusSq) {
-            return false; // delete this stroke
-          }
-        }
-      }
-      
       return true;
     }).toList();
 
     if (newStrokes.length != state.strokes.length) {
-       // We erased something! startStroke already pushed to undoHistory, so we just update the strokes.
        state = state.copyWith(strokes: newStrokes);
-    } else {
-       // We erased nothing. Pop the undoHistory entry that startStroke added.
-       final newUndoHistory = List<List<Stroke>>.from(state.undoHistory);
-       if (newUndoHistory.isNotEmpty) {
-         newUndoHistory.removeLast();
-       }
-       state = state.copyWith(undoHistory: newUndoHistory);
     }
   }
 }

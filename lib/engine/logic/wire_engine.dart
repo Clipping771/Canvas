@@ -3,11 +3,10 @@ import '../../models/stroke.dart';
 import '../../models/tool_type.dart';
 
 class WireEngine {
-  /// Updates the paths of all wire strokes to connect their source and target objects.
-  /// Also handles routing wires through portals if the connected objects have jumped.
+  /// Updates the paths of all wire strokes to snap to their connected objects
+  /// and draws a beautiful sagging bezier curve between them.
   static List<Stroke> updateWires(List<Stroke> strokes) {
     final updatedStrokes = List<Stroke>.from(strokes);
-    final portals = strokes.where((s) => s.toolType == ToolType.portal).toList();
     final Map<String, Stroke> strokeMap = {for (var s in strokes) s.id: s};
     final List<Stroke> finalStrokeList = [];
 
@@ -26,39 +25,7 @@ class WireEngine {
             final sourceCenter = sourceStroke.bounds.center;
             final targetCenter = targetStroke.bounds.center;
 
-            final jumpPortalId1 = sourceStroke.customMetadata?['lastPortalId'] as String?;
-            final jumpPortalId2 = targetStroke.customMetadata?['lastPortalId'] as String?;
-
-            List<Offset> newPoints = [];
-            Map<String, dynamic> newMeta = stroke.customMetadata != null 
-                ? Map<String, dynamic>.from(stroke.customMetadata!) 
-                : {};
-            
-            if (jumpPortalId1 != null || jumpPortalId2 != null) {
-               // Complex case: routed through portals
-               final sourceLastPortal = jumpPortalId1 != null ? strokeMap[jumpPortalId1] : null;
-               
-               if (sourceLastPortal != null && sourceLastPortal.customMetadata?['destinationId'] != null) {
-                 final sourceOriginPortalId = sourceLastPortal.customMetadata!['destinationId'] as String;
-                 final sourceOriginPortal = strokeMap[sourceOriginPortalId];
-                 
-                 if (sourceOriginPortal != null) {
-                    final firstSegment = _generateBezierPoints(targetCenter, sourceOriginPortal.bounds.center);
-                    newPoints.addAll(firstSegment);
-                    newMeta['jumpIndices'] = [firstSegment.length];
-                    newPoints.addAll(_generateBezierPoints(sourceLastPortal.bounds.center, sourceCenter));
-                 } else {
-                    newPoints = _generateBezierPoints(sourceCenter, targetCenter);
-                    newMeta.remove('jumpIndices');
-                 }
-               } else {
-                  newPoints = _generateBezierPoints(sourceCenter, targetCenter);
-                  newMeta.remove('jumpIndices');
-               }
-            } else {
-               newPoints = _generateBezierPoints(sourceCenter, targetCenter);
-               newMeta.remove('jumpIndices');
-            }
+            final newPoints = _generateBezierPoints(sourceCenter, targetCenter);
             
             finalStrokeList.add(Stroke(
               id: stroke.id,
@@ -69,25 +36,126 @@ class WireEngine {
               size: stroke.size,
               rotation: stroke.rotation,
               toolType: stroke.toolType,
+              text: stroke.text,
+              imageBytes: stroke.imageBytes,
+              decodedImage: stroke.decodedImage,
               isFilled: stroke.isFilled,
-              customMetadata: newMeta,
+              semanticMeaning: stroke.semanticMeaning,
+              physicsEnabled: stroke.physicsEnabled,
+              customMetadata: stroke.customMetadata,
+              version: stroke.version,
             ));
+            continue;
           }
-          // If source or target is null, the wire is orphaned and is naturally dropped
         }
-      } else {
-        finalStrokeList.add(stroke);
       }
+      finalStrokeList.add(stroke);
     }
     
-    return finalStrokeList;
+    return simulateCircuit(finalStrokeList);
+  }
+
+  /// Traverses the connections (Wires and Portals) to find connected components.
+  /// If a "Light" text stroke is connected to a "Battery" text stroke, it turns yellow.
+  static List<Stroke> simulateCircuit(List<Stroke> strokes) {
+    final Map<String, Stroke> strokeMap = {for (var s in strokes) s.id: s};
+    
+    // Build adjacency list for undirected graph
+    final Map<String, Set<String>> graph = {};
+    for (var s in strokes) {
+      graph[s.id] = {};
+    }
+
+    // Connect wires
+    for (var s in strokes) {
+      if (s.toolType == ToolType.wire) {
+        final sourceId = s.customMetadata?['sourceId'] as String?;
+        final targetId = s.customMetadata?['targetId'] as String?;
+        if (sourceId != null && targetId != null) {
+          graph[sourceId]?.add(targetId);
+          graph[targetId]?.add(sourceId);
+        }
+      } else if (s.toolType == ToolType.portal) {
+        final destId = s.customMetadata?['destinationId'] as String?;
+        if (destId != null) {
+          graph[s.id]?.add(destId);
+          graph[destId]?.add(s.id);
+        }
+      }
+    }
+
+    // Find components
+    final Set<String> visited = {};
+    final List<Set<String>> components = [];
+
+    for (var nodeId in graph.keys) {
+      if (!visited.contains(nodeId)) {
+        final Set<String> component = {};
+        final List<String> queue = [nodeId];
+        visited.add(nodeId);
+
+        while (queue.isNotEmpty) {
+          final current = queue.removeAt(0);
+          component.add(current);
+
+          for (var neighbor in graph[current] ?? <String>{}) {
+            if (!visited.contains(neighbor)) {
+              visited.add(neighbor);
+              queue.add(neighbor);
+            }
+          }
+        }
+        components.add(component);
+      }
+    }
+
+    // Apply circuit logic: If a component has "Battery" (case-insensitive), all "Light" strokes in it turn yellow
+    final List<Stroke> simulatedStrokes = [];
+    for (var s in strokes) {
+      if (s.toolType == ToolType.text && s.text != null && s.text!.toLowerCase() == 'light') {
+        // Find component containing this light
+        final component = components.firstWhere((c) => c.contains(s.id), orElse: () => {});
+        bool hasPower = false;
+        for (var id in component) {
+          final compStroke = strokeMap[id];
+          if (compStroke != null && compStroke.toolType == ToolType.text && compStroke.text != null && compStroke.text!.toLowerCase() == 'battery') {
+            hasPower = true;
+            break;
+          }
+        }
+
+        final targetColor = hasPower ? Colors.yellow.shade600 : Colors.grey;
+        if (s.color != targetColor) {
+           simulatedStrokes.add(Stroke(
+              id: s.id,
+              groupId: s.groupId,
+              name: s.name,
+              points: s.points,
+              color: targetColor,
+              size: s.size,
+              rotation: s.rotation,
+              toolType: s.toolType,
+              text: s.text,
+              imageBytes: s.imageBytes,
+              decodedImage: s.decodedImage,
+              isFilled: s.isFilled,
+              semanticMeaning: s.semanticMeaning,
+              physicsEnabled: s.physicsEnabled,
+              customMetadata: s.customMetadata,
+              version: s.version + 1,
+            ));
+            continue;
+        }
+      }
+      simulatedStrokes.add(s);
+    }
+
+    return simulatedStrokes;
   }
 
   static List<Offset> _generateBezierPoints(Offset p1, Offset p2) {
-    // Generate a simple quadratic bezier curve for the wire
     final dx = p2.dx - p1.dx;
     final dy = p2.dy - p1.dy;
-    // Add some sag to the wire
     final controlPoint = Offset(
       p1.dx + dx / 2,
       p1.dy + dy / 2 + (dx.abs() * 0.2).clamp(20.0, 100.0),

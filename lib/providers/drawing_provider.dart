@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/stroke.dart';
 import '../models/tool_type.dart';
+import '../engine/logic/wire_engine.dart';
 import '../models/easter_egg_mode.dart';
 import '../models/canvas_environment.dart';
 import '../engine/particle_engine.dart';
@@ -616,6 +617,66 @@ class DrawingNotifier extends Notifier<DrawingState> {
         _currentStroke = null;
         return;
       }
+      
+      if (state.currentTool == ToolType.wire && _currentStroke!.points.length > 2) {
+        final startPoint = _currentStroke!.points.first;
+        final endPoint = _currentStroke!.points.last;
+
+        Stroke? sourceStroke;
+        Stroke? targetStroke;
+
+        for (var s in state.strokes.take(state.strokes.length - 1)) {
+          if (s.bounds.inflate(20).contains(startPoint)) sourceStroke = s;
+          if (s.bounds.inflate(20).contains(endPoint)) targetStroke = s;
+        }
+
+        if (sourceStroke != null && targetStroke != null) {
+          if (sourceStroke.toolType == ToolType.portal && targetStroke.toolType == ToolType.portal) {
+            final newStrokes = List<Stroke>.from(state.strokes)..removeLast();
+            
+            Stroke copyStrokeWithMeta(Stroke s, String destinationId) {
+              return Stroke(
+                id: s.id, groupId: s.groupId, name: s.name, points: s.points,
+                color: s.color, size: s.size, rotation: s.rotation, toolType: s.toolType,
+                text: s.text, imageBytes: s.imageBytes, decodedImage: s.decodedImage,
+                isFilled: s.isFilled, semanticMeaning: s.semanticMeaning, physicsEnabled: s.physicsEnabled,
+                customMetadata: {...(s.customMetadata ?? {}), 'destinationId': destinationId},
+                version: s.version + 1,
+              );
+            }
+            
+            final newSource = copyStrokeWithMeta(sourceStroke, targetStroke.id);
+            final newTarget = copyStrokeWithMeta(targetStroke, sourceStroke.id);
+            
+            final sourceIndex = newStrokes.indexWhere((s) => s.id == sourceStroke!.id);
+            if (sourceIndex != -1) newStrokes[sourceIndex] = newSource;
+            
+            final targetIndex = newStrokes.indexWhere((s) => s.id == targetStroke!.id);
+            if (targetIndex != -1) newStrokes[targetIndex] = newTarget;
+
+            state = state.copyWith(strokes: WireEngine.updateWires(newStrokes));
+            _currentStroke = null;
+            return;
+          } else {
+            final newMeta = {...(_currentStroke!.customMetadata ?? {})};
+            newMeta['sourceId'] = sourceStroke.id;
+            newMeta['targetId'] = targetStroke.id;
+            
+            final correctedWire = Stroke(
+                id: _currentStroke!.id, groupId: _currentStroke!.groupId, name: _currentStroke!.name, points: _currentStroke!.points,
+                color: _currentStroke!.color, size: _currentStroke!.size, rotation: _currentStroke!.rotation, toolType: _currentStroke!.toolType,
+                text: _currentStroke!.text, imageBytes: _currentStroke!.imageBytes, decodedImage: _currentStroke!.decodedImage,
+                isFilled: _currentStroke!.isFilled, semanticMeaning: _currentStroke!.semanticMeaning, physicsEnabled: _currentStroke!.physicsEnabled,
+                customMetadata: newMeta,
+                version: _currentStroke!.version + 1,
+            );
+            final newStrokes = List<Stroke>.from(state.strokes);
+            newStrokes.last = correctedWire;
+            state = state.copyWith(strokes: newStrokes);
+            _currentStroke = correctedWire;
+          }
+        }
+      }
 
       // Calculate Bounds
       double minX = double.infinity, minY = double.infinity;
@@ -659,6 +720,9 @@ class DrawingNotifier extends Notifier<DrawingState> {
         state = state.copyWith(lastAddedBounds: currentBounds);
       }
     }
+    
+    // Simulate circuit logic and recalculate wires
+    state = state.copyWith(strokes: WireEngine.updateWires(state.strokes));
     _currentStroke = null;
   }
 

@@ -216,12 +216,12 @@ class DrawingCanvasPainter extends CustomPainter {
         final radius = (bounds.width + bounds.height) / 4;
         
         final portalPaint = Paint()
-          ..color = Colors.cyanAccent.withValues(alpha: 0.8)
+          ..color = Colors.blue.shade300.withValues(alpha: 0.8)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 4.0;
         
         final glowPaint = Paint()
-          ..color = Colors.cyan.withValues(alpha: 0.3)
+          ..color = Colors.indigo.withValues(alpha: 0.3)
           ..style = PaintingStyle.fill
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10.0);
           

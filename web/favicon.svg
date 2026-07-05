@@ -12,14 +12,14 @@
   </defs>
   <style>
     @keyframes shimmer {
-      0% { opacity: 0.5; transform: scale(0.95); }
+      0% { opacity: 0.6; transform: scale(0.95); }
       50% { opacity: 1; transform: scale(1.05); }
-      100% { opacity: 0.5; transform: scale(0.95); }
+      100% { opacity: 0.6; transform: scale(0.95); }
     }
     .glow-box {
       fill: none;
       stroke: #81d4fa;
-      stroke-width: 4;
+      stroke-width: 6;
       filter: url(#glow);
       animation: shimmer 2s infinite ease-in-out;
       transform-origin: center;
@@ -27,8 +27,13 @@
     .inner-box {
       fill: #ffffff;
     }
+    .bolt {
+      fill: #0288d1;
+    }
   </style>
   
-  <rect class="glow-box" x="16" y="16" width="32" height="32" rx="10" />
-  <rect class="inner-box" x="16" y="16" width="32" height="32" rx="10" />
+  <rect class="glow-box" x="8" y="8" width="48" height="48" rx="14" />
+  <rect class="inner-box" x="8" y="8" width="48" height="48" rx="14" />
+  
+  <path class="bolt" d="M33,15 L19,37 h12 L27,49 L45,27 H33 L37,15 Z" />
 </svg>

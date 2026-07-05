@@ -84,6 +84,15 @@ class WireEngine {
       }
     }
 
+    // Auto-link if exactly two portals exist and they aren't explicitly linked
+    final allPortals = strokes.where((s) => s.toolType == ToolType.portal).toList();
+    if (allPortals.length == 2) {
+      final p1 = allPortals[0];
+      final p2 = allPortals[1];
+      graph[p1.id]?.add(p2.id);
+      graph[p2.id]?.add(p1.id);
+    }
+
     // Find components
     final Set<String> visited = {};
     final List<Set<String>> components = [];

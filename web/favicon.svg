@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur1" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+  <style>
+    @keyframes shimmer {
+      0% { opacity: 0.5; transform: scale(0.95); }
+      50% { opacity: 1; transform: scale(1.05); }
+      100% { opacity: 0.5; transform: scale(0.95); }
+    }
+    .glow-box {
+      fill: none;
+      stroke: #81d4fa;
+      stroke-width: 4;
+      filter: url(#glow);
+      animation: shimmer 2s infinite ease-in-out;
+      transform-origin: center;
+    }
+    .inner-box {
+      fill: #ffffff;
+    }
+  </style>
+  
+  <rect class="glow-box" x="16" y="16" width="32" height="32" rx="10" />
+  <rect class="inner-box" x="16" y="16" width="32" height="32" rx="10" />
+</svg>

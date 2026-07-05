@@ -1316,8 +1316,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
       }
     );
   }
-
-
+  void _showSpiceDialog() {
     final spice = TeslaEngine().generateSpiceNetlist();
     _showCodeDialog('SPICE Export', spice);
   }

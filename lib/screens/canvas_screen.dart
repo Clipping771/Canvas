@@ -1,4 +1,4 @@
-﻿import 'dart:typed_data';
+import 'dart:typed_data';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -1249,7 +1249,11 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
             const Divider(height: 16, color: Color(0xFFE2E8F0)),
             buildActionItem(Icons.auto_fix_high, 'Clear page', () => ref.read(drawingProvider.notifier).clear(), isDestructive: true),
             buildActionItem(Icons.delete_outline, 'Delete canvas', () {
-              Future.microtask(() => ref.read(notebookProvider.notifier).deletePage(notebook.id, page.id));
+              Navigator.of(context).pop(); // pop the menu
+              Navigator.of(context).pop(); // pop the canvas screen
+              Future.delayed(const Duration(milliseconds: 300), () {
+                ref.read(notebookProvider.notifier).deletePage(notebook.id, page.id);
+              });
             }, isDestructive: true),
             const SizedBox(height: 8),
           ],

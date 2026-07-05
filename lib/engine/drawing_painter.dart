@@ -4,6 +4,8 @@ import '../models/stroke.dart';
 import '../models/tool_type.dart';
 import 'dart:convert';
 import 'package:google_fonts/google_fonts.dart';
+import 'logic/components/component_registry.dart';
+import 'logic/models/circuit_pin.dart';
 
 class BackgroundPainter extends CustomPainter {
   @override
@@ -206,6 +208,26 @@ class DrawingCanvasPainter extends CustomPainter {
         textPainter.layout(maxWidth: stroke.size * 30.0);
         textPainter.paint(canvas, Offset.zero);
         canvas.restore();
+
+        // Draw Pins for CircuitComponents
+        final comp = ComponentRegistry().createComponent(stroke);
+        if (comp != null) {
+          final center = stroke.bounds.center;
+          for (var pin in comp.pins) {
+            final pinPos = center + pin.relativePosition;
+            final isOutput = pin.direction == PortDirection.output;
+            final pinPaint = Paint()
+              ..color = isOutput ? Colors.red.shade400 : Colors.blue.shade400
+              ..style = PaintingStyle.fill;
+            canvas.drawCircle(pinPos, 6.0, pinPaint);
+            
+            final borderPaint = Paint()
+              ..color = Colors.white
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.5;
+            canvas.drawCircle(pinPos, 6.0, borderPaint);
+          }
+        }
         return;
       }
 

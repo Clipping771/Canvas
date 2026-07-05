@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/stroke.dart';
 import '../models/tool_type.dart';
 import '../engine/logic/tesla_engine.dart';
+import '../engine/logic/components/component_registry.dart';
 import '../models/easter_egg_mode.dart';
 import '../models/canvas_environment.dart';
 import '../engine/particle_engine.dart';
@@ -661,6 +662,36 @@ class DrawingNotifier extends Notifier<DrawingState> {
             final newMeta = {...(_currentStroke!.customMetadata ?? {})};
             newMeta['sourceId'] = sourceStroke.id;
             newMeta['targetId'] = targetStroke.id;
+            
+            // Resolve nearest Source Pin
+            final sourceComp = ComponentRegistry().createComponent(sourceStroke);
+            if (sourceComp != null && sourceComp.pins.isNotEmpty) {
+              final center = sourceStroke.bounds.center;
+              var minDistance = double.infinity;
+              for (var pin in sourceComp.pins) {
+                final pos = center + pin.relativePosition;
+                final dist = (pos - startPoint).distance;
+                if (dist < minDistance) {
+                  minDistance = dist;
+                  newMeta['sourcePinId'] = pin.id;
+                }
+              }
+            }
+
+            // Resolve nearest Target Pin
+            final targetComp = ComponentRegistry().createComponent(targetStroke);
+            if (targetComp != null && targetComp.pins.isNotEmpty) {
+              final center = targetStroke.bounds.center;
+              var minDistance = double.infinity;
+              for (var pin in targetComp.pins) {
+                final pos = center + pin.relativePosition;
+                final dist = (pos - endPoint).distance;
+                if (dist < minDistance) {
+                  minDistance = dist;
+                  newMeta['targetPinId'] = pin.id;
+                }
+              }
+            }
             
             final correctedWire = Stroke(
                 id: _currentStroke!.id, groupId: _currentStroke!.groupId, name: _currentStroke!.name, points: _currentStroke!.points,

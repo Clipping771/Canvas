@@ -50,20 +50,26 @@ class TeslaEngine {
       }
     }
 
-    // Pass 2: Connect Pins via Wires (Fallback to first available input/output if pin ID is missing)
+    // Pass 2: Connect Pins via Wires
     for (var stroke in strokes) {
       if (stroke.toolType == ToolType.wire) {
         final sourceId = stroke.customMetadata?['sourceId'] as String?;
         final targetId = stroke.customMetadata?['targetId'] as String?;
+        final sourcePinId = stroke.customMetadata?['sourcePinId'] as String?;
+        final targetPinId = stroke.customMetadata?['targetPinId'] as String?;
         
         if (sourceId != null && targetId != null) {
           final sourceComp = _activeComponents[sourceId];
           final targetComp = _activeComponents[targetId];
           
           if (sourceComp != null && targetComp != null) {
-            // Find first output pin of source and first input pin of target
-            final sourcePin = sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
-            final targetPin = targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
+            final sourcePin = sourcePinId != null 
+                ? sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == sourcePinId, orElse: () => null)
+                : sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
+                
+            final targetPin = targetPinId != null 
+                ? targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == targetPinId, orElse: () => null)
+                : targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
             
             if (sourcePin != null && targetPin != null) {
               targetPin.state = sourcePin.state.copyWith();
@@ -85,12 +91,20 @@ class TeslaEngine {
         if (stroke.toolType == ToolType.wire) {
           final sourceId = stroke.customMetadata?['sourceId'] as String?;
           final targetId = stroke.customMetadata?['targetId'] as String?;
+          final sourcePinId = stroke.customMetadata?['sourcePinId'] as String?;
+          final targetPinId = stroke.customMetadata?['targetPinId'] as String?;
+          
           if (sourceId != null && targetId != null) {
             final sourceComp = _activeComponents[sourceId];
             final targetComp = _activeComponents[targetId];
             if (sourceComp != null && targetComp != null) {
-              final sourcePin = sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
-              final targetPin = targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
+              final sourcePin = sourcePinId != null 
+                  ? sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == sourcePinId, orElse: () => null)
+                  : sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
+                  
+              final targetPin = targetPinId != null 
+                  ? targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == targetPinId, orElse: () => null)
+                  : targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
               if (sourcePin != null && targetPin != null) {
                 targetPin.state = sourcePin.state.copyWith();
               }
@@ -100,7 +114,7 @@ class TeslaEngine {
       }
     }
 
-    // Pass 4: Visual Updates
+    // Pass 4: Visual Updates & Bezier Wire Generation
     final List<Stroke> updatedStrokes = [];
     for (var stroke in strokes) {
       if (_activeComponents.containsKey(stroke.id)) {
@@ -115,21 +129,38 @@ class TeslaEngine {
         }
       } else if (stroke.toolType == ToolType.wire) {
         final sourceId = stroke.customMetadata?['sourceId'] as String?;
-        if (sourceId != null && _activeComponents.containsKey(sourceId)) {
+        final targetId = stroke.customMetadata?['targetId'] as String?;
+        final sourcePinId = stroke.customMetadata?['sourcePinId'] as String?;
+        final targetPinId = stroke.customMetadata?['targetPinId'] as String?;
+
+        if (sourceId != null && targetId != null && _activeComponents.containsKey(sourceId) && _activeComponents.containsKey(targetId)) {
           final sourceComp = _activeComponents[sourceId]!;
-          final sourcePin = sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
-          if (sourcePin != null && (sourcePin.state.logic == LogicState.high || sourcePin.state.voltage > 0)) {
-            if (stroke.color != Colors.orange) {
+          final targetComp = _activeComponents[targetId]!;
+
+          final sourceStroke = strokes.firstWhere((s) => s.id == sourceId);
+          final targetStroke = strokes.firstWhere((s) => s.id == targetId);
+
+          final sourcePin = sourcePinId != null 
+              ? sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == sourcePinId, orElse: () => null)
+              : sourceComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.output, orElse: () => null);
+              
+          final targetPin = targetPinId != null 
+              ? targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.id == targetPinId, orElse: () => null)
+              : targetComp.pins.cast<CircuitPin?>().firstWhere((p) => p?.direction == PortDirection.input, orElse: () => null);
+
+          if (sourcePin != null && targetPin != null) {
+            final startPoint = sourceStroke.bounds.center + sourcePin.relativePosition;
+            final endPoint = targetStroke.bounds.center + targetPin.relativePosition;
+            
+            final bezierPoints = _generateBezierPoints(startPoint, endPoint);
+            
+            final isPowered = sourcePin.state.logic == LogicState.high || sourcePin.state.voltage > 0;
+            final targetColor = isPowered ? Colors.orange : Colors.grey;
+
+            if (stroke.color != targetColor || stroke.points.length != bezierPoints.length || (stroke.points.isNotEmpty && stroke.points.first != bezierPoints.first)) {
               updatedStrokes.add(stroke.copyWith(
-                color: Colors.orange,
-                version: stroke.version + 1,
-              ));
-              continue;
-            }
-          } else {
-             if (stroke.color != Colors.grey) {
-              updatedStrokes.add(stroke.copyWith(
-                color: Colors.grey,
+                color: targetColor,
+                points: bezierPoints,
                 version: stroke.version + 1,
               ));
               continue;
@@ -141,6 +172,25 @@ class TeslaEngine {
     }
 
     return updatedStrokes;
+  }
+
+  List<Offset> _generateBezierPoints(Offset start, Offset end) {
+    // Sagging bezier curve for wires
+    final controlPoint1 = Offset(start.dx + (end.dx - start.dx) / 2, start.dy + 50);
+    final controlPoint2 = Offset(end.dx - (end.dx - start.dx) / 2, end.dy + 50);
+    
+    final points = <Offset>[];
+    for (double t = 0; t <= 1.0; t += 0.05) {
+      final x = _cubicBezier(t, start.dx, controlPoint1.dx, controlPoint2.dx, end.dx);
+      final y = _cubicBezier(t, start.dy, controlPoint1.dy, controlPoint2.dy, end.dy);
+      points.add(Offset(x, y));
+    }
+    return points;
+  }
+
+  double _cubicBezier(double t, double p0, double p1, double p2, double p3) {
+    final u = 1 - t;
+    return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
   }
 }
 

@@ -1,0 +1,73 @@
+import 'package:flutter/material.dart';
+import '../../../../models/stroke.dart';
+import '../models/circuit_component.dart';
+import '../models/circuit_pin.dart';
+import '../models/logic_state.dart';
+import '../models/signal_state.dart';
+import '../core/simulation_tick.dart';
+
+class Motor extends CircuitComponent {
+  @override
+  String get name => 'Motor';
+
+  @override
+  List<String> get aliases => ['Motor', 'Engine', 'Fan'];
+
+  @override
+  Map<String, dynamic> get metadata => {'maxRpm': 3000.0, 'operatingVoltage': 9.0};
+
+  late final List<CircuitPin> _pins;
+  double _currentRpm = 0.0;
+  bool _isOn = false;
+
+  Motor(Stroke stroke) : super(id: stroke.id, originalStroke: stroke) {
+    _pins = [
+      CircuitPin(
+        id: '${id}_in',
+        name: '+',
+        direction: PortDirection.input,
+        relativePosition: const Offset(-50, 0),
+      ),
+      CircuitPin(
+        id: '${id}_out',
+        name: '-',
+        direction: PortDirection.output,
+        relativePosition: const Offset(50, 0),
+      ),
+    ];
+  }
+
+  @override
+  List<CircuitPin> get pins => _pins;
+
+  @override
+  void evaluate(SimulationTick tick) {
+    final inputVoltage = _pins[0].state.voltage;
+    final operatingVoltage = metadata['operatingVoltage'] as double;
+    final maxRpm = metadata['maxRpm'] as double;
+    
+    if (inputVoltage > 0) {
+      _isOn = true;
+      // Calculate RPM based on voltage proportion
+      _currentRpm = (inputVoltage / operatingVoltage) * maxRpm;
+      if (_currentRpm > maxRpm) _currentRpm = maxRpm;
+      
+      // Motor drops voltage to ground usually if directly connected
+      _pins[1].state.voltage = 0.0;
+      _pins[1].state.logic = LogicState.low;
+    } else {
+      _isOn = false;
+      _currentRpm = 0.0;
+      _pins[1].state.logic = LogicState.low;
+      _pins[1].state.voltage = 0.0;
+    }
+  }
+
+  @override
+  Color getActiveColor() {
+    if (!_isOn) return Colors.grey;
+    // Map RPM to color brightness (faster = brighter cyan)
+    final ratio = _currentRpm / (metadata['maxRpm'] as double);
+    return Color.lerp(Colors.cyan.shade900, Colors.cyanAccent, ratio)!;
+  }
+}

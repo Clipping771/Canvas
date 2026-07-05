@@ -9,6 +9,9 @@ import 'components/ground.dart';
 import 'components/switch_component.dart';
 import 'components/led.dart';
 import 'components/logic_gates.dart';
+import 'components/clock.dart';
+import 'components/resistor.dart';
+import 'components/motor.dart';
 
 class TeslaEngine {
   static final TeslaEngine _instance = TeslaEngine._internal();
@@ -31,6 +34,10 @@ class TeslaEngine {
     registry.register('and', (s) => AndGate(s));
     registry.register('or', (s) => OrGate(s));
     registry.register('not', (s) => NotGate(s));
+    registry.register('clock', (s) => Clock(s));
+    registry.register('oscillator', (s) => Clock(s));
+    registry.register('resistor', (s) => Resistor(s));
+    registry.register('motor', (s) => Motor(s));
   }
 
   static List<Stroke> updateWires(List<Stroke> strokes) {

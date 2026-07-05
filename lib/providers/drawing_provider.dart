@@ -1515,12 +1515,10 @@ class DrawingNotifier extends Notifier<DrawingState> {
         return true; 
       }
       
-      // For widgets, chemistry, images etc., bounds overlap is enough to delete
+      // For widgets and latex, bounds overlap is enough to delete (since they are drawn as separate Flutter widgets outside the canvas layer)
       if (stroke.toolType == ToolType.latex || 
           stroke.toolType == ToolType.widget || 
-          stroke.smiles != null ||
-          stroke.imageBytes != null ||
-          stroke.text != null) {
+          stroke.smiles != null) {
         return false;
       }
       

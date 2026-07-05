@@ -1185,7 +1185,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
             ),
           );
         }
-        Widget buildActionItem(IconData icon, String title, VoidCallback onTap, {bool isDestructive = false}) {
+        Widget buildActionItem(IconData icon, String title, VoidCallback onTap, {bool isDestructive = false, bool hasNewBadge = false}) {
           final color = isDestructive ? const Color(0xFFD32F2F) : const Color(0xFF2E384D);
           final iconColor = isDestructive ? const Color(0xFFD32F2F) : const Color(0xFF5C6B89);
           return InkWell(
@@ -1200,6 +1200,14 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                   Icon(icon, size: 20, color: iconColor),
                   const SizedBox(width: 12),
                   Text(title, style: TextStyle(fontSize: 15, color: color, fontWeight: FontWeight.w500)),
+                  if (hasNewBadge) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: const Color(0xFFE8F0FE), borderRadius: BorderRadius.circular(10)),
+                      child: const Text('New', style: TextStyle(fontSize: 10, color: Color(0xFF1A73E8), fontWeight: FontWeight.w600)),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1217,17 +1225,40 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                 setMenuState(() {});
               },
             ),
-            buildSwitchItem(
-              Icons.auto_awesome, 'Animations', currentAnim == EasterEggMode.discovery,
-              (val) {
-                ref.read(drawingProvider.notifier).setEasterEggMode(
-                  val ? EasterEggMode.discovery : EasterEggMode.normal
+            buildActionItem(
+              Icons.auto_awesome, 'Animations', 
+              () {
+                showDialog(
+                  context: context,
+                  builder: (context) {
+                    final currentMode = ref.read(drawingProvider).easterEggMode;
+                    return AlertDialog(
+                      title: const Text('Animation Options'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: EasterEggMode.values.map((mode) {
+                          return RadioListTile<EasterEggMode>(
+                            title: Text(mode.name.substring(0, 1).toUpperCase() + mode.name.substring(1)),
+                            value: mode,
+                            groupValue: currentMode,
+                            onChanged: (val) {
+                              if (val != null) {
+                                ref.read(drawingProvider.notifier).setEasterEggMode(val);
+                                Navigator.pop(context);
+                              }
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    );
+                  },
                 );
-              }, hasNewBadge: true,
+              }, 
+              hasNewBadge: true,
             ),
-            buildSwitchItem(
-              Icons.center_focus_strong, 'Focus AI output', false,
-              (val) {
+            buildActionItem(
+              Icons.center_focus_strong, 'Focus AI output', 
+              () {
                 final bounds = ref.read(drawingProvider).lastAddedBounds;
                 if (bounds != null && _canvasKey.currentState != null) {
                   final size = MediaQuery.of(context).size;
@@ -1239,7 +1270,6 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
                   final targetY = (size.height / 2) - (bounds.center.dy * targetScale);
                   _canvasKey.currentState!.transformationController.value = Matrix4.identity()..translate(targetX, targetY)..scale(targetScale);
                 }
-                Navigator.pop(context);
               },
             ),
             const Divider(height: 16, color: Color(0xFFE2E8F0)),
@@ -1249,7 +1279,6 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen>
             const Divider(height: 16, color: Color(0xFFE2E8F0)),
             buildActionItem(Icons.auto_fix_high, 'Clear page', () => ref.read(drawingProvider.notifier).clear(), isDestructive: true),
             buildActionItem(Icons.delete_outline, 'Delete canvas', () {
-              Navigator.of(context).pop(); // pop the menu
               Navigator.of(context).pop(); // pop the canvas screen
               Future.delayed(const Duration(milliseconds: 300), () {
                 ref.read(notebookProvider.notifier).deletePage(notebook.id, page.id);

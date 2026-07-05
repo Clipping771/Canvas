@@ -1555,3 +1555,7 @@ class DrawingNotifier extends Notifier<DrawingState> {
     }
   }
 }
+
+final drawingProvider = NotifierProvider<DrawingNotifier, DrawingState>(
+  DrawingNotifier.new,
+);

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 
 class AiAgentService {
@@ -8,12 +9,13 @@ class AiAgentService {
     if (_isRequestInProgress) {
       throw Exception('A request is already in progress. Please wait.');
     }
-    
+
     final now = DateTime.now();
-    if (_lastRequestTime != null && now.difference(_lastRequestTime!).inSeconds < 1) {
+    if (_lastRequestTime != null &&
+        now.difference(_lastRequestTime!).inSeconds < 1) {
       throw Exception('Too many requests. Please wait a moment.');
     }
-    
+
     _isRequestInProgress = true;
     _lastRequestTime = now;
 
@@ -27,28 +29,28 @@ class AiAgentService {
 }
 
 void main() async {
-  print('Starting rapid-fire rate-limit test...');
-  
+  debugPrint('Starting rapid-fire rate-limit test...');
+
   final futures = <Future>[];
   for (int i = 1; i <= 5; i++) {
-    print('Tap $i fired');
+    debugPrint('Tap $i fired');
     futures.add(
       AiAgentService.askAgent("test prompt $i", i)
-        .then((res) => print('Tap $i Success: $res'))
-        .catchError((e) => print('Tap $i Blocked: $e'))
+          .then((res) => debugPrint('Tap $i Success: $res'))
+          .catchError((e) => debugPrint('Tap $i Blocked: $e')),
     );
   }
-  
+
   await Future.wait(futures);
-  print('Test complete. Releasing lock and waiting 1.5 seconds...');
-  
+  debugPrint('Test complete. Releasing lock and waiting 1.5 seconds...');
+
   await Future.delayed(Duration(milliseconds: 1500));
-  
-  print('Trying Tap 6 after lock release...');
+
+  debugPrint('Trying Tap 6 after lock release...');
   try {
     final res = await AiAgentService.askAgent("test prompt 6", 6);
-    print('Tap 6 Success: $res');
+    debugPrint('Tap 6 Success: $res');
   } catch (e) {
-    print('Tap 6 Blocked: $e');
+    debugPrint('Tap 6 Blocked: $e');
   }
 }

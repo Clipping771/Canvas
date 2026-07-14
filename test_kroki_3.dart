@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:io';
 
@@ -43,5 +44,5 @@ stop
   );
 
   await File('test_output.png').writeAsBytes(response.bodyBytes);
-  print('Saved test_output.png with size: \${response.bodyBytes.length}');
+  debugPrint('Saved test_output.png with size: \${response.bodyBytes.length}');
 }

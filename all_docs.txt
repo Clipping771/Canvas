@@ -1,0 +1,496 @@
+\n\n### docs/strategy/00_project_governance.md\n\n# 00 - Project Governance
+
+## 1. Document Lifecycle
+All strategic and architectural documents must follow this strict lifecycle:
+1. **Draft:** Initial creation by the AI Agent or Human Owner.
+2. **Review:** Internal review by the engineering team, followed by external validation (where appropriate).
+3. **Approved:** Formal approval by the Product Owner.
+4. **Baseline:** The document becomes the source of truth for downstream execution. (Code generation is permitted only against baselined specs).
+5. **Superseded:** Replaced by a newer version following a significant architectural pivot.
+
+## 2. Ownership & Authority
+- **Product Owner (Human):** Holds ultimate decision authority. Responsible for approving architecture, providing external validation results, and defining the business model.
+- **Lead Architect / Implementer (AI Agent):** Responsible for proposing architectures, drafting specifications, writing code against baselined documents, and enforcing the Golden Rule.
+
+## 3. Milestones & Timeline
+The project is divided into iterative sprints, focusing on establishing the platform architecture before any product code is written.
+
+*   **Sprint 0: Strategy & Foundations**
+    *   Goal: Define the "What" and "Why".
+    *   Exit Criteria: Domain Model and PRD are baselined.
+*   **Sprint 1: Agentic Rulebook & Contracts**
+    *   Goal: Establish the rules of engagement for AI-driven development.
+    *   Exit Criteria: Definition of Done and Ports & Adapters specifications are baselined.
+*   **Sprint 2: Workflow & Curriculum Specifications**
+    *   Goal: Detail the hierarchical learning framework.
+    *   Exit Criteria: Curriculum architecture and Workflows are baselined.
+*   **Sprint 3: Execution, Risk & Future Planning**
+    *   Goal: Prepare for long-term scalability and track decisions.
+    *   Exit Criteria: ADR log initialized, Assumption Register populated.
+
+## 4. Verification Gates
+No architectural decision or code implementation may be merged without passing the 5 Verification Gates:
+1. Can this vary by country?
+2. Can this vary by school?
+3. Can this vary by provider?
+4. Can this vary in the future?
+5. Does this belong in the immutable core?
+
+*(If 1-4 are YES, it must be implemented via configuration, adapter, registry, or plugin).*
+
+## 5. External Validation Plan
+Before the baseline of Workflow and Curriculum documents (Sprint 2), the Product Owner must validate the assumptions with actual stakeholders (Teachers, Students, and potentially Parents) to ensure the technical architecture aligns with market reality.
+\n\n### docs/strategy/01_prd.md\n\n# 01 - Product Requirements Document (PRD)
+
+## 1. Executive Summary & Vision
+Vinci Board is not just a digital whiteboard; it is a **Curriculum-Aware spatial learning platform** designed initially for high school STEM education. The vision is to build an environment where the curriculum, physics simulations, AI providers, and educational workflows are replaceable modules built upon a highly stable, event-driven core. 
+
+## 2. Positioning & The "Wedge"
+**The Problem:** Google Classroom is great for management but terrible for content creation. Microsoft OneNote is a great blank canvas but has zero understanding of the curriculum or the subjects being taught on it. 
+**The Solution (Our Wedge):** Vinci Board acts as the bridge. It is an **AI Visual Learning Workspace**. When a student draws a chemical bond, the platform *knows* it's chemistry, validates it against the curriculum, and provides contextual feedback. 
+
+## 3. Target Audience & Adoption Strategy
+- **Primary Persona:** The High School STEM Teacher (Year 7 - 12).
+- **Adoption Strategy:** Bottom-up. We must provide tools (e.g., AI automated grading of visual diagrams, 1-click interactive lesson generation) that immediately reduce a teacher's out-of-hours workload. If the teacher adopts it, they will mandate their students use it to complete assignments, driving student acquisition for free.
+
+## 4. Core Epics (Phase 1)
+1. **The Event-Driven Canvas:** An infinite spatial canvas that broadcasts user actions (strokes, object placement) to listening engines.
+2. **The Hexagonal Engine System:** The ability to load isolated "Engines" (Chemistry, Physics) that react to canvas events without being hardcoded into the UI.
+3. **Hybrid AI Orchestration:** A pipeline where fast intent-detection runs locally (on-device), and complex Socratic tutoring runs via cloud LLMs.
+4. **Adapter-based Storage & Auth:** All file saving and user management must be behind strict interfaces to allow swapping from local storage to Firebase to Enterprise SSO.
+
+## 5. Non-Goals (Out of Scope for Phase 1)
+- Building our own proprietary LLM. We will use adapters for existing models (Gemini, OpenAI).
+- Replacing standard School Information Systems (SIS) like Canvas LMS or Google Classroom. We will eventually integrate with them via adapters, not replace them.
+- Non-STEM subjects (History, English). The initial focus is strictly on visual, simulation-heavy subjects.
+\n\n### docs/strategy/02_user_personas.md\n\n# 02 - User Personas
+
+> **Product Axiom:** If we don't solve the teacher's problem first, the student will never see the product.
+
+## 1. The Gatekeeper: Sarah, High School Physics Teacher
+- **Context:** Sarah teaches 4 classes of Year 11 Physics. She has 120 students total.
+- **The Friction:** She spends 15 hours a week grading paper exams and assignments. Creating visual diagrams for her lesson slides takes hours in PowerPoint. Her students constantly struggle to visualize magnetic fields in 3D.
+- **The Vinci Board Solution:** Sarah uses Vinci Board to drag-and-drop a pre-built magnetic field simulation onto her lesson canvas. She distributes the canvas to her students. When students complete the embedded quiz by drawing vectors on the canvas, Vinci's Hybrid AI grades 85% of them automatically, leaving only 15% (nuanced/creative answers) for her to manually review.
+- **Success Metric for Sarah:** Hours saved per week.
+
+## 2. The End User: Leo, Year 11 Student
+- **Context:** Leo is a visual learner who struggles with static textbook equations.
+- **The Friction:** When he does his homework at 8 PM, Sarah isn't there to answer his questions. If he gets stuck on a vector addition problem, he just stops working.
+- **The Vinci Board Solution:** Leo opens the canvas assignment. He drags vectors around to "feel" how they add up. When he gets stuck, he pings the AI Learning Partner. The AI doesn't give him the answer; it highlights his vector and asks a Socratic question based on his specific mistake.
+- **Success Metric for Leo:** "Aha!" moments / reduced homework abandonment.
+
+## 3. The Buyer: Mark, School IT Director
+- **Context:** Mark manages software licenses for 2,000 students.
+- **The Friction:** He hates fragmented tools. Teachers buying individual $15/month subscriptions is a nightmare for data privacy compliance (FERPA/GDPR).
+- **The Vinci Board Solution:** Mark is pitched on a centralized Enterprise dashboard. Vinci Board integrates with Google Workspace SSO. Mark has full audit logs of what the AI is saying to students, ensuring safety compliance.
+- **Success Metric for Mark:** Zero compliance breaches + single consolidated invoice.
+\n\n### docs/strategy/03_domain_model.md\n\n# 03 - Domain Model
+
+This document establishes the **Ubiquitous Language** for Vinci Board. If a term is not defined here, it should not exist in the Core Platform code.
+
+## The Canvas Domain
+- **Workspace:** The absolute root. A serialization boundary representing one saved file or collaborative session.
+- **Canvas:** The infinite spatial coordinate system. Knows only about X/Y coordinates and zoom levels.
+- **SpatialNode:** The base class for *everything* that exists on a Canvas.
+  - *Subtypes:* `StrokeNode` (user drawing), `EntityNode` (a loaded 3D molecule or image), `PortalNode` (a window to another Workspace).
+
+## The Engineering Domain
+- **EventBus:** The asynchronous messaging system that decouples the UI from the logic.
+- **Engine:** A self-contained module that listens to the EventBus, performs domain-specific logic (e.g., Chemistry parsing), and emits new events.
+- **Port:** An interface defined by the Core (e.g., `IAiProvider`) that dictates how external services must behave.
+- **Adapter:** A concrete implementation of a Port (e.g., `GeminiProAdapter`) that sits completely outside the Core.
+
+## The Education Domain
+- **LearningFramework:** A hierarchical structure of educational standards, heavily nested (Subject -> Strand -> Topic -> Standard).
+- **CurriculumAdapter:** Since every country/state has different standards, the curriculum is never hardcoded. It is loaded via adapters (e.g., `AustralianCurriculumAdapter`).
+\n\n### docs/strategy/04_business_model.md\n\n# 04 - Business Model & Strategy
+
+## 1. The Economic Engine (B2B SaaS)
+Vinci Board is not a B2C app for students. Student acquisition costs (CAC) are too high, and their willingness to pay (WTP) is too low. The product is a **B2B SaaS platform for Schools and Districts.**
+
+### The Trojan Horse Strategy (Bottom-Up)
+1. **The Hook:** Individual teachers (like Sarah) find the product online. They use a restricted "Freemium" version to create a visual lesson and grade a small assignment. It saves them 2 hours.
+2. **The Spread:** Sarah tells the other 3 science teachers in her department. They all start using the free tier.
+3. **The Upsell (Land and Expand):** The free tier limits AI grading to 50 submissions per month. Once the science department hits this limit, the Head of Department takes the software to the IT Director (Mark) to purchase a "Department License" from their discretionary budget.
+
+## 2. Configurable Entitlement Tiers
+Because the platform is built on adapters, our Entitlement Engine can dynamically enable/disable features without branching the codebase.
+
+| Tier | Target | Key Features | LLM Strategy |
+| :--- | :--- | :--- | :--- |
+| **Freemium** | Solo Teacher | Basic Canvas, 50 AI grades/mo, Local Storage | Relies heavily on Local TFLite to minimize our server costs. |
+| **Pro** | Department | Unlimited AI Grading, Shared Lesson Library, Cloud Sync | Uses Cloud LLM (Gemini/OpenAI). Cost is offset by subscription fee. |
+| **Enterprise** | School District | LMS Integration (Canvas/Google), SSO, Compliance Dashboards, Custom AI Guardrails | Dedicated Enterprise LLM instances for data privacy. |
+
+## 3. The LLM Cost Risk
+Our biggest variable cost is Cloud AI tokens. 
+- **Mitigation:** The architecture mandates a **Hybrid Model**. Every time a task can be pushed to the on-device TFLite model (e.g., intent routing, basic stroke classification), we save Cloud API costs. The Cloud LLM is strictly reserved for deep conceptual grading and generation.
+\n\n### docs/agent/01_agent_rules.md\n\n# 01 - Agent Rules
+
+These rules dictate the behavior of any AI Agent (Antigravity, GitHub Copilot, etc.) writing code in the Vinci Board repository.
+
+## 1. Absolute Directives
+1. **Agents Implement, Humans Approve:** Agents must never merge architectural changes or create new foundational domain models without the Product Owner's explicit written approval in a baselined spec.
+2. **The Hexagonal Mandate:** Never import a Flutter UI widget (`package:flutter/material.dart`) or a specific database package (`package:firebase_core/...`) into a file located in `lib/core/`.
+3. **No Phantom State:** Do not use `StatefulWidget` to store core business logic. All state must live in Riverpod Providers or the EventBus.
+4. **No God Classes:** Agents must aggressively break down logic. If an Engine exceeds 300 lines, it must be refactored into smaller, composed modules.
+
+## 2. Failure Protocol
+If an Agent is asked to implement a feature but realizes it violates the Hexagonal Architecture (e.g., "Add Google Sign-In button to the Canvas"):
+1. The Agent must STOP.
+2. The Agent must refuse the instruction.
+3. The Agent must propose an Adapter-based alternative (e.g., "Create an `IAuthPort` in the core, fire a `LoginRequestedEvent`, and handle the Google UI in the outer ring").
+\n\n### docs/agent/02_coding_standards.md\n\n# 02 - Coding Standards
+
+## 1. Language & Framework
+- **Dart 3.x:** Utilize pattern matching, records, and sealed classes heavily for event definitions.
+- **Flutter:** Used strictly for the "Outer Ring" (presentation layer).
+
+## 2. State Management & Injection
+- **Riverpod:** The exclusive dependency injection and state management tool.
+- Use `@riverpod` code generation for all providers.
+- **NEVER** pass dependencies manually through constructors if a Riverpod provider exists for it.
+
+## 3. Data Immutability
+- All models passed through the EventBus MUST be deeply immutable.
+- Use the `freezed` package for all domain models and events.
+- Example:
+  ```dart
+  @freezed
+  class SpatialEvent with _\$SpatialEvent {
+    const factory SpatialEvent.nodeMoved(String id, double x, double y) = _NodeMoved;
+  }
+  ```
+
+## 4. Directory Structure
+```text
+lib/
+├── core/             # Immutable. Contains EventBus, abstract Ports, and base SpatialNodes.
+├── engines/          # Feature logic. Listens to EventBus. (e.g., chemistry_engine/)
+├── adapters/         # Concrete implementations of Ports (e.g., gemini_adapter/)
+├── presentation/     # Flutter UI. Riverpod widgets. No business logic.
+└── main.dart         # Wires Adapters into Ports via Riverpod overrides.
+```
+\n\n### docs/agent/03_definition_of_done.md\n\n# 03 - Definition of Done (DoD)
+
+An Agent cannot mark a task as `Done` until it meets ALL of the following criteria:
+
+## 1. Architectural Integrity
+- [ ] No `core/` file imports anything from `adapters/` or `presentation/`.
+- [ ] No direct dependencies exist between different `engines/` (they must communicate via the EventBus).
+
+## 2. State & Safety
+- [ ] All new state is immutable (using `freezed`).
+- [ ] Edge cases (e.g., Network failure when calling an LLM) are caught and handled gracefully without crashing the UI.
+
+## 3. Testing
+- [ ] **Unit Tests:** Any new Engine logic is tested in isolation (mocking the EventBus).
+- [ ] **Contract Tests:** Any new Adapter passes the contract tests defined by its Port.
+
+## 4. Human Verification
+- [ ] The Product Owner has reviewed the PR or the Agent's architectural summary and explicitly approved the implementation.
+\n\n### docs/agent/04_ports_and_adapters.md\n\n# 04 - Ports & Adapters Specification
+
+> **The Golden Rule:** Stable Core. Replaceable Everything Else.
+
+The Core Platform must never import an external library for AI, Database, Authentication, or Curriculum mapping.
+
+## 1. Abstract Ports (Interfaces inside the Core)
+The Core defines exactly what it needs to survive.
+
+```dart
+// Example: Core doesn't care if it's Firebase or SQLite.
+abstract class IStoragePort {
+  Future<void> saveWorkspace(Workspace workspace);
+  Future<Workspace> loadWorkspace(String id);
+}
+
+// Example: Core doesn't care if it's Gemini or OpenAI.
+abstract class IAiProviderPort {
+  Future<AiResponse> evaluateAnswer(AiRequest request);
+  Future<AiResponse> detectIntent(AiRequest request);
+}
+```
+
+## 2. Concrete Adapters (Implementations outside the Core)
+Adapters live in the outer ring of the Hexagonal architecture. They implement the Ports.
+
+### Current Required Adapters
+- `FirebaseStorageAdapter` implements `IStoragePort`
+- `LocalHiveStorageAdapter` implements `IStoragePort`
+- `GeminiAiAdapter` implements `IAiProviderPort`
+- `OnDeviceTfLiteAdapter` implements `IAiProviderPort`
+
+## 3. Dependency Injection
+We will use **Riverpod** to inject the correct Adapter into the Port at runtime.
+This means for tests, we can inject a `MockAiAdapter` and test the entire application offline in milliseconds.
+\n\n### docs/agent/05_architecture_contracts.md\n\n# 05 - Architecture Contracts
+
+Contracts define exactly how the Core communicates with Engines, ensuring they remain decoupled. An Agent must review these contracts before implementing a new Engine.
+
+## Contract 1: The Canvas Engine
+- **Role:** Pure renderer and spatial math calculator.
+- **Input Events:** `UiTapEvent`, `UiPanEvent`, `StateUpdatedEvent` (from other engines).
+- **Output Events:** `NodeSelectedEvent`, `StrokeCompletedEvent`, `CanvasViewChangedEvent`.
+- **Constraint:** The Canvas Engine is "dumb". If a user draws a molecule, the Canvas Engine only knows a `StrokeNode` was drawn. It is up to the `AiIntentEngine` to classify it.
+
+## Contract 2: The Event Bus
+- **Role:** The sole communication channel.
+- **Constraint:** Events must be fire-and-forget. An Engine must never await a response directly from the Event Bus. If an Engine needs a response (e.g., waiting for an AI calculation), it must listen for an `AiCalculationCompletedEvent` later in time.
+
+## Contract 3: Engine Boundaries
+- **Role:** Isolated feature logic (e.g., `ChemistryEngine`).
+- **Constraint:** An Engine cannot hold a reference to another Engine. They only know about the Event Bus.
+\n\n### docs/agent/prompt_library/README.md\n\n# Prompt Library
+
+This directory holds the baseline LLM prompts used by the `IAiProviderPort` adapters. 
+
+> **CRITICAL RULE:** Because LLMs are non-deterministic, you cannot change a prompt in this directory without running the regression test suite (`spikes/ai_grading_prototype.dart`) against the 50 baseline exam papers.
+
+## Why store prompts as Markdown?
+Storing prompts here instead of hardcoding them inside Dart strings allows:
+1. Version control of prompt engineering.
+2. Easy review by the human Product Owner (Teachers).
+3. The ability to load them dynamically via the `StoragePort`.
+
+---
+
+## Example: `grading_rubric_v1.md`
+
+**System Instructions:**
+You are an expert high school STEM teacher. You are evaluating a student's answer based on a specific rubric.
+You must return your response STRICTLY as a JSON object matching this schema:
+```json
+{
+  "score": int (0-10),
+  "feedback": "string",
+  "confidence": double (0.0 - 1.0),
+  "flagForHumanReview": boolean
+}
+```
+
+**Evaluation Rules:**
+1. If you are less than 90% confident, you MUST set `flagForHumanReview` to true.
+2. Do not penalize for minor spelling mistakes unless it changes the scientific meaning.
+3. Your feedback must follow the Socratic method (do not just give the correct answer; explain what they missed).
+\n\n### docs/agent/06_testing_strategy.md\n\n# 06 - Testing Strategy
+
+Vinci Board utilizes a rigorous Testing Strategy to ensure the "Stable Core" remains bulletproof, while allowing rapid iteration on the Adapters.
+
+## 1. Domain Unit Tests (Core & Engines)
+- **Target:** The Core EventBus, Spatial Math, and isolated Engine logic.
+- **Rule:** These tests must execute in < 1 second. No I/O, no network calls, no Flutter UI.
+- **Method:** We inject a `MockEventBus` into an Engine, fire an event, and assert that the Engine emits the correct response event.
+
+## 2. Port & Adapter Contract Tests (Adapters)
+- **Target:** The outer ring (Firebase, Gemini).
+- **Rule:** If we swap `GeminiAdapter` for `OpenAiAdapter`, we must be mathematically certain the app won't break.
+- **Method:** We write a single suite of tests against `IAiProviderPort`. Both the Gemini and OpenAI adapters must pass this identical test suite (proving they honor the contract).
+
+## 3. UI Widget Tests (Presentation)
+- **Target:** Flutter UI components.
+- **Rule:** Widgets are tested strictly by overriding Riverpod providers with mocked states. We do not test the actual Firebase connection when testing a login button.
+
+## 4. AI Prompt Regression Testing
+- **Target:** The `prompt_library`.
+- **Rule:** Because LLMs are non-deterministic, any change to a prompt (e.g., grading rubric) must be run against a static batch of 50 past exam papers to ensure the accuracy (measured in `spikes/ai_grading_prototype.dart`) does not degrade.
+\n\n### docs/strategy/05_curriculum_architecture.md\n\n# 05 - Curriculum Architecture
+
+> **The Golden Rule:** Stable Core. Replaceable Everything Else.
+
+The biggest mistake in EdTech is hardcoding the US Common Core or Australian Curriculum into the application logic. Vinci Board utilizes a deeply hierarchical configuration system.
+
+## 1. The Configuration Hierarchy
+Settings cascade downwards. If a setting is not explicitly defined at a lower level, it falls back to the parent.
+`Platform Defaults -> Country (Adapter) -> State/Province -> School -> Teacher -> Student`
+
+## 2. The Curriculum Adapter
+The Core Platform only understands generic terms: `Subject`, `Strand`, `Topic`, `Lesson`.
+To load the Australian Year 11 Physics curriculum, the system injects an `ICurriculumAdapter`.
+
+### Adapter Responsibilities:
+- Fetch JSON/YAML definitions of the local curriculum.
+- Map local curriculum IDs to Vinci Board `Topic` IDs.
+- Determine which `Engines` should be loaded for a specific subject (e.g., Load `PhysicsSimulatorEngine` when the `Mechanics` topic is active).
+
+## 3. The Subject Registry (YAML Spec)
+Subjects are defined in YAML and loaded dynamically.
+
+```yaml
+SubjectPlugin:
+  Id: aus_physics_y11
+  Name: Year 11 Physics (ACARA)
+  RequiredEngines:
+    - VectorMathEngine
+    - KinematicsSimulator
+  BlockedEngines:
+    - OrganicChemistryEngine # Don't load unused engines to save memory
+```
+\n\n### docs/strategy/06_student_teacher_workflows.md\n\n# 06 - Student & Teacher Workflows
+
+This document defines the exact UX flows for our primary personas, optimizing heavily for the "Teacher-Led Bottom-Up Adoption" strategy.
+
+## 1. The Teacher Flow (Sarah)
+**Goal:** Distribute an interactive assignment in under 5 minutes.
+1. **Creation:** Sarah opens an empty Canvas.
+2. **AI Assistance:** She types `/generate magnetic_field_quiz`. The AI Provider generates a spatial layout with a pre-configured magnetic field simulation and 3 vector drawing prompts.
+3. **Distribution:** Sarah clicks "Share to Classroom" (via `ILmsAdapter`). It generates a unique join code/link.
+4. **Review Dashboard:** As students submit, the UI displays a heat-map of the classroom's understanding. 85% of answers are auto-graded. Sarah only clicks on the red "Review Needed" flags to manually intervene.
+
+## 2. The Student Flow (Leo)
+**Goal:** Visually learn a concept without getting permanently stuck.
+1. **Consumption:** Leo opens the Canvas via the link. He is presented with the interactive simulation.
+2. **Interaction:** He plays with the variables (e.g., increasing magnet strength) and visually observes the field changes.
+3. **The Socratic AI:** Leo is stuck on question 2. He selects his vector and clicks "Help".
+4. **Context-Aware Prompt:** The system sends his exact vector coordinates and the curriculum rubric to the AI. The AI responds: "Notice the direction of the north pole. Which way do magnetic field lines travel?" (It does not give him the answer).
+\n\n### docs/strategy/07_system_architecture.md\n\n# 07 - System Architecture
+
+> **The Golden Rule:** Stable Core. Replaceable Everything Else.
+
+## 1. Core Paradigm: Event-Driven Hexagonal Architecture (Ports and Adapters)
+Vinci Board rejects the monolithic tightly-coupled feature model. The application is divided into an immutable **Core Domain** and replaceable **Adapters**.
+
+### 1.1 The Immutable Core
+The core domain is responsible for the absolute foundational physics and spatial geometry of the application. It has zero knowledge of "Chemistry", "Gemini", or "Firebase".
+- **Workspace Manager:** Handles file I/O operations through an abstract storage interface.
+- **Event Bus:** The central nervous system. All cross-domain communication happens via asynchronous event streams. *(Validated: >10k events/sec throughput)*
+- **Spatial Node Graph (Canvas Engine):** Manages rendering, panning, zooming, and hit-testing of generic `SpatialNode` objects.
+
+### 1.2 The Engine Registry
+Features are implemented as isolated **Engines** that plug into the core via the Event Bus.
+Example Engines:
+- `ChemistryEngine`
+- `PhysicsSimulatorEngine`
+- `GamificationEngine`
+- `TeacherAnalyticsEngine`
+
+## 2. Event Flow Example
+When a student interacts with the canvas:
+1. **Canvas Engine** detects a stroke and emits `StrokeDrawnEvent`.
+2. **AiIntentEngine** listens, analyzes the stroke, classifies it as a molecule, and emits `MoleculeIntentDetectedEvent`.
+3. **ChemistryEngine** listens to the intent, converts the stroke to a structured chemical graph, and emits `ChemistryStateUpdatedEvent`.
+4. **GamificationEngine** observes the successful interaction and awards XP.
+5. **Canvas Engine** listens to the chemistry state update and replaces the raw stroke with a rendered 3D molecule.
+
+*At no point did the Canvas Engine directly call `ChemistryEngine.render()`.*
+
+## 3. Dependency Rules
+- **Inner Ring:** Core Platform (Event Bus, Canvas Engine, Base Models).
+- **Middle Ring:** Feature Engines (Chemistry, Physics).
+- **Outer Ring:** Adapters (UI Widgets, Cloud Sync, LLM APIs).
+- **Rule:** Dependencies can only point INWARD. Adapters depend on Ports defined by the Core. The Core depends on nothing.
+\n\n### docs/strategy/08_ai_architecture.md\n\n# 08 - AI Architecture
+
+> **The Golden Rule:** Stable Core. Replaceable Everything Else.
+
+## 1. Hybrid AI Routing
+Vinci Board utilizes a tiered AI strategy to optimize for cost, latency, and offline capability.
+
+### 1.1 Tier 1: Local / On-Device (TFLite)
+- **Role:** Fast, continuous processing without network overhead.
+- **Use Cases:** Stroke classification, intent detection, basic handwriting recognition, spatial organization.
+- **Trigger:** Immediate upon user action.
+
+### 1.2 Tier 2: Cloud LLM (The \"Provider\")
+- **Role:** Deep conceptual understanding and complex generation.
+- **Use Cases:** Socratic tutoring, generating diagrams (PlantUML), evaluating free-form exam answers.
+- **Implementation:** Must be abstracted behind an `IAiProvider` interface (Adapter pattern) so the underlying model (Gemini, Claude, GPT) can be swapped without touching the core.
+
+## 2. AI Orchestration Pipeline
+When a complex user action occurs (e.g., asking the AI Chat Panel a question):
+
+1. **Intent Detection:** Local model determines what the user wants (e.g., "Ask a physics question" vs "Draw a molecule").
+2. **Planner:** The AI creates a sequence of actions.
+3. **Retriever:** Context is gathered from the Canvas Engine (e.g., extracting the text of the currently selected nodes).
+4. **Tool Selection:** The AI chooses an action (e.g., `generate_plantuml`, `spawn_spatial_node`).
+5. **Action:** The system executes the tool.
+6. **Verification (Hybrid Grading):** If acting as a reviewer, the AI provides a confidence score. High confidence triggers automatic feedback. Low confidence safely flags the answer for manual teacher review. *(Validated: Spike A-02)*
+
+## 3. The "I Don't Know" Fallback
+AI hallucination is unacceptable in education. The AI Runtime must explicitly include a fallback protocol where the system politely informs the student that it cannot verify the answer and redirects them to their teacher or textbook.
+\n\n### docs/strategy/09_data_and_privacy.md\n\n# 09 - Data & Privacy Architecture
+
+Selling to schools requires ironclad privacy compliance (FERPA in the US, GDPR in Europe, etc.). 
+
+## 1. Privacy By Design (Local-First)
+Vinci Board is fundamentally a **Local-First** application.
+- All canvas strokes, interactions, and basic AI processing (Tier 1 TFLite) happen entirely on the device.
+- We do not transmit continuous telemetry of student behavior to the cloud.
+
+## 2. Cloud LLM PII Scrubbing
+Before any context is sent to a Tier 2 Cloud LLM (e.g., Gemini/OpenAI):
+1. The `AiIntentEngine` strips all Personally Identifiable Information (PII) from the payload.
+2. The payload is anonymized with a session UUID, not a student ID.
+3. We explicitly mandate zero-retention policies via our Enterprise agreements with AI Providers.
+
+## 3. The Compliance Adapter
+Because privacy laws vary by country, compliance is handled via Adapters, injected based on the user's location setting.
+- `GdprComplianceAdapter`: Enforces strict right-to-be-forgotten and explicit consent flows.
+- `CoppaComplianceAdapter`: Enforces parental consent gates for users under 13.
+- If a school (the Buyer) dictates a policy, it overrides the platform defaults via the Configuration Hierarchy.
+\n\n### docs/agent/adr_log/0000_template.md\n\n# ADR 0000: Architecture Decision Record Template
+
+**Date:** YYYY-MM-DD
+**Status:** [Proposed | Accepted | Rejected | Superseded by ADR-XXXX]
+
+## Context
+What is the problem we are trying to solve? Why are we making a decision now?
+
+## Decision
+What is the exact architectural change we are making? (e.g., "We will use Riverpod for all dependency injection").
+
+## Verification Gate (The 5 Questions)
+1. Can this vary by country? (Yes/No)
+2. Can this vary by school? (Yes/No)
+3. Can this vary by provider? (Yes/No)
+4. Can this vary in the future? (Yes/No)
+5. Does this belong in the immutable core? (Yes/No)
+
+## Consequences
+- **Positive:** What gets better?
+- **Negative/Risk:** What technical debt or limitation are we accepting?
+\n\n### docs/strategy/assumption_register.md\n\n# Assumption Register
+
+> [!IMPORTANT]  
+> **Needs Human Input:** These assumptions dictate the entire product strategy. They must be actively validated before we write the associated code.
+
+| ID | Assumption | Confidence | Validation Method | Owner | Status | Action Required |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **A-01** | Teachers prefer visual assignments over text-based ones. | Low | 5x Teacher Interviews | Product Owner | **Pending** | Schedule interviews with high school STEM teachers. |
+| **A-02** | AI grading assist saves >30% of teacher time without hallucinating scores. | Medium | Prototype testing with past exam papers | AI Architect | **Validated** | Built `spikes/ai_grading_prototype.dart` proving the hybrid approach. The AI can process and score straightforward answers with high confidence, while securely flagging nuanced or incorrect answers for manual teacher review. |
+| **A-03** | Schools will pay for centralized admin features (SSO, Compliance) rather than teachers expensing individual licenses. | Medium | Market analysis / Admin Interviews | Product Owner | **Pending** | Interview 2 School IT Administrators. |
+| **A-04** | The Event-Driven architecture will not introduce unacceptable latency on low-end school devices. | High | Performance Benchmark | AI Architect | **Validated** | Built `spikes/event_bus_benchmark.dart` and confirmed comfortable throughput of >10,000 events/sec overhead. No structural latency issues found. |
+\n\n### docs/strategy/validation_results.md\n\n# Validation Results
+
+This document records the empirical outcomes of our technical spikes and market research. It acts as the source of truth for converting "Assumptions" into established facts.
+
+## 1. Technical Validations (AI & Architecture)
+- **Event Bus Latency (A-04):** `[VALIDATED]` on 2026-07-09 via `spikes/event_bus_benchmark.dart`. The architecture sustained 10,000+ events/sec overhead with zero structural latency, proving the Hexagonal Event-Driven model is viable for complex spatial interaction.
+- **Hybrid AI Grading (A-02):** `[VALIDATED]` on 2026-07-09 via `spikes/ai_grading_prototype.dart`. Demonstrated that an LLM can score straightforward answers and safely flag nuanced/incorrect answers via a `flagForHumanReview` boolean, securing the "teacher-in-the-loop" requirement.
+
+## 2. Market Validations (Product & Business)
+- **Teacher Visual Preference (A-01):** `[PENDING]` Awaiting results from 5x STEM Teacher interviews.
+- **Admin Purchasing Power (A-03):** `[PENDING]` Awaiting IT Administrator interviews to confirm willingness to purchase centralized Department/School licenses.
+\n\n### docs/strategy/roadmap_long_term.md\n\n# Long-Term Roadmap (12-24 Months)
+
+> **Goal:** Transition from a technical prototype to a scalable B2B EdTech Platform.
+
+## Phase 1: The Core Foundation (Months 1-3)
+- Implement the EventBus and basic SpatialNode rendering in Flutter.
+- Establish the `IStoragePort` and `IAiProviderPort`.
+- **Milestone:** A teacher can drag a node, write text, and save the workspace locally.
+
+## Phase 2: The "Wedge" Features (Months 4-6)
+- Develop the `ChemistryEngine` and `PhysicsSimulatorEngine`.
+- Integrate the Hybrid AI Model (Local intent routing + Cloud Socratic tutoring).
+- **Milestone:** A student can draw a molecule, the system recognizes it, and the AI can grade a basic visual assignment.
+
+## Phase 3: The Classroom Distribution Loop (Months 7-9)
+- Implement `ILmsAdapter` (Google Classroom / Canvas LMS integration).
+- Build the Teacher Analytics Dashboard (heat-maps of student progress).
+- **Milestone:** A teacher can generate a lesson and distribute it to 30 students via a single link.
+
+## Phase 4: Enterprise Scale (Months 10-12)
+- Implement SSO and centralized compliance adapters (FERPA/GDPR).
+- Build the "School Admin" billing and deployment tier.
+- **Milestone:** The first full-school or district-wide deployment.

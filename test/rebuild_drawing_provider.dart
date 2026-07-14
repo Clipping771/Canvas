@@ -1,12 +1,18 @@
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 
 void main() {
-  final file = File('c:/My World/gravity/notesketch_pro/lib/providers/drawing_provider.dart');
+  final file = File(
+    'c:/My World/gravity/vinci_board/lib/providers/drawing_provider.dart',
+  );
   var content = file.readAsStringSync();
-  
+
   // 1. Remove WorldSimulation and ShapeRecognizer imports
-  content = content.replaceAll("import '../engine/spatial/shape_recognizer.dart';", "");
-  
+  content = content.replaceAll(
+    "import '../engine/spatial/shape_recognizer.dart';",
+    "",
+  );
+
   // 2. Remove lastDetectedShape from DrawingState
   content = content.replaceAll("final ShapeType? lastDetectedShape;", "");
   content = content.replaceAll("final Rect? lastDetectedShapeBounds;", "");
@@ -14,8 +20,14 @@ void main() {
   content = content.replaceAll("Rect? lastDetectedShapeBounds,", "");
   content = content.replaceAll("this.lastDetectedShape,", "");
   content = content.replaceAll("this.lastDetectedShapeBounds,", "");
-  content = content.replaceAll("lastDetectedShape: lastDetectedShape ?? this.lastDetectedShape,", "");
-  content = content.replaceAll("lastDetectedShapeBounds: lastDetectedShapeBounds ?? this.lastDetectedShapeBounds,", "");
+  content = content.replaceAll(
+    "lastDetectedShape: lastDetectedShape ?? this.lastDetectedShape,",
+    "",
+  );
+  content = content.replaceAll(
+    "lastDetectedShapeBounds: lastDetectedShapeBounds ?? this.lastDetectedShapeBounds,",
+    "",
+  );
 
   // 3. Add _enforceHistoryLimit
   final enforceLimitCode = '''
@@ -63,29 +75,33 @@ void main() {
   }
 
   void _pushUndo() {''';
-  
+
   content = content.replaceAll('  void _pushUndo() {', enforceLimitCode);
 
   // 4. Inject _enforceHistoryLimit calls
   content = content.replaceAll(
     '..add(List.from(state.strokes));',
-    '..add(List.from(state.strokes));\n    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);'
+    '..add(List.from(state.strokes));\n    _enforceHistoryLimit(newUndoHistory, state.redoHistory, state.strokes);',
   );
   content = content.replaceAll(
     'newUndoHistory.add(List.from(state.strokes));',
-    'newUndoHistory.add(List.from(state.strokes));\n    _enforceHistoryLimit(newUndoHistory, [], state.strokes);'
+    'newUndoHistory.add(List.from(state.strokes));\n    _enforceHistoryLimit(newUndoHistory, [], state.strokes);',
   );
 
   // 5. Remove tweenStrokes
   final tweenStrokesStart = content.indexOf('  Future<void> tweenStrokes(');
   if (tweenStrokesStart != -1) {
-    final removeStrokesStart = content.indexOf('  void removeStrokes(List<Stroke> strokesToRemove) {');
+    final removeStrokesStart = content.indexOf(
+      '  void removeStrokes(List<Stroke> strokesToRemove) {',
+    );
     content = content.replaceRange(tweenStrokesStart, removeStrokesStart, '');
   }
 
   // 6. Rewrite eraseAtPoint and add commitErasure
-  final eraseAtPointStart = content.indexOf('  void eraseAtPoint(Offset point, double radius) {');
-  
+  final eraseAtPointStart = content.indexOf(
+    '  void eraseAtPoint(Offset point, double radius) {',
+  );
+
   final eraserLogic = '''
   void eraseAtPoint(Offset point, double radius) {
     if (state.strokes.isEmpty) return;
@@ -149,20 +165,32 @@ void main() {
   }
 
 ''';
-  
+
   // Actually, we should replace from `eraseAtPoint` to `void setTool(ToolType tool) {`
   final setToolStart = content.indexOf('  void setTool(ToolType tool) {');
   if (eraseAtPointStart != -1 && setToolStart != -1) {
-     content = content.replaceRange(eraseAtPointStart, setToolStart, eraserLogic);
+    content = content.replaceRange(
+      eraseAtPointStart,
+      setToolStart,
+      eraserLogic,
+    );
   }
 
   // 7. Remove ShapeRecognizer logic from endStroke()
-  final shapeRecognizerLogicStart = content.indexOf('      // Auto-correct shapes if in discovery mode');
-  final shapeRecognizerLogicEnd = content.indexOf('      ref.read(gamificationProvider.notifier).addXp(5);');
+  final shapeRecognizerLogicStart = content.indexOf(
+    '      // Auto-correct shapes if in discovery mode',
+  );
+  final shapeRecognizerLogicEnd = content.indexOf(
+    '      ref.read(gamificationProvider.notifier).addXp(5);',
+  );
   if (shapeRecognizerLogicStart != -1 && shapeRecognizerLogicEnd != -1) {
-      content = content.replaceRange(shapeRecognizerLogicStart, shapeRecognizerLogicEnd, '');
+    content = content.replaceRange(
+      shapeRecognizerLogicStart,
+      shapeRecognizerLogicEnd,
+      '',
+    );
   }
 
   file.writeAsStringSync(content);
-  print('Rebuilt drawing_provider.dart successfully.');
+  debugPrint('Rebuilt drawing_provider.dart successfully.');
 }

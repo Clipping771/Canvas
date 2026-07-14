@@ -1,4 +1,4 @@
-# notesketch_pro
+# vinci_board
 
 A new Flutter project.
 

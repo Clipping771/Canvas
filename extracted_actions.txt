@@ -1,0 +1,1429 @@
+    if (!mounted) return "";
+    final drawingNotifier = ref.read(drawingProvider.notifier);
+    final newStrokes = <Stroke>[];
+    int objectsAdded = 0;
+    int objectsUpdated = 0;
+    int objectsRemoved = 0;
+    final unrecognized = <String>[];
+    String? aiFocusTargetId;
+
+    final transform = widget.getTransform?.call();
+    Matrix4 inverse;
+    if (transform != null) {
+      inverse = Matrix4.copy(transform)..invert();
+    } else {
+      inverse = Matrix4.identity();
+    }
+
+    Offset mapPoint(double x, double y) {
+      // Divide by the same pixelRatio used in CanvasExporter (0.5)
+      final scaledX = x / 0.5;
+      final scaledY = y / 0.5;
+      final point = MatrixUtils.transformPoint(
+        inverse,
+        Offset(scaledX, scaledY),
+      );
+      return point;
+    }
+
+    double? internalSafeY;
+    Offset? lastPlacedPos;
+    Offset? lastRequestedPos;
+
+    bool checkCollision(Rect newBounds) {
+      final spatialCandidates = drawingNotifier.spatialIndex.queryRect(
+        newBounds,
+      );
+      if (spatialCandidates.isNotEmpty) {
+        return true;
+      }
+      for (var s in newStrokes) {
+        if (s.points.isNotEmpty && newBounds.overlaps(s.bounds)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    for (var action in actions) {
+      if (_cancelRequested) {
+        throw Exception("Cancelled by user");
+      }
+      if (action is Map) {
+        final type = action['action'] ?? action['type'] ?? 'unknown';
+
+        try {
+          if (type == 'clear_canvas') {
+            drawingNotifier.clear();
+            objectsUpdated++; // Prevent fallback
+            continue;
+          } else if (type == 'update') {
+            final targetId = action['targetId']?.toString();
+            final targetGroupId = action['targetGroupId']?.toString();
+            final patch = action['patch'] is Map
+                ? action['patch'] as Map
+                : null;
+            if (patch != null && (targetId != null || targetGroupId != null)) {
+              final colorHex = patch['color']?.toString();
+              Color? patchColor;
+              if (colorHex != null) {
+                try {
+                  if (colorHex.startsWith('#')) {
+                    patchColor = Color(
+                      int.parse(colorHex.substring(1), radix: 16) + 0xFF000000,
+                    );
+                  } else if (colorHex.startsWith('0x') ||
+                      colorHex.startsWith('0X')) {
+                    patchColor = Color(
+                      int.parse(colorHex.substring(2), radix: 16),
+                    );
+                  } else {
+                    // Fallback for named colors if they hallucinate
+                    if (colorHex.toLowerCase() == 'red') {
+                      patchColor = Colors.red;
+                    } else if (colorHex.toLowerCase() == 'blue')
+                      patchColor = Colors.blue;
+                    else if (colorHex.toLowerCase() == 'green')
+                      patchColor = Colors.green;
+                    else if (colorHex.toLowerCase() == 'yellow')
+                      patchColor = Colors.yellow;
+                    else if (colorHex.toLowerCase() == 'black')
+                      patchColor = Colors.black;
+                    else if (colorHex.toLowerCase() == 'white')
+                      patchColor = Colors.white;
+                    else
+                      patchColor = Color(int.parse(colorHex));
+                  }
+                } catch (_) {}
+              }
+              final isFilled = patch['isFilled'] is bool
+                  ? patch['isFilled'] as bool
+                  : (patch['isFilled']?.toString().toLowerCase() == 'true');
+
+              Stroke updater(Stroke s) {
+                return s.copyWith(color: patchColor, isFilled: isFilled);
+              }
+
+              if (targetId != null) {
+                objectsUpdated += drawingNotifier.updateStrokeById(
+                  targetId,
+                  updater,
+                );
+              } else if (targetGroupId != null) {
+                objectsUpdated += drawingNotifier.updateStrokesByGroupId(
+                  targetGroupId,
+                  updater,
+                );
+              }
+            }
+            continue;
+          } else if (type == 'remove') {
+            final targetId = action['targetId']?.toString();
+            final targetGroupId = action['targetGroupId']?.toString();
+            if (targetId != null || targetGroupId != null) {
+              final ids = <String>[];
+              if (targetId != null) ids.add(targetId);
+              if (targetGroupId != null) ids.add(targetGroupId);
+              objectsRemoved += drawingNotifier.removeStrokesByIds(ids);
+            }
+            continue;
+          } else if (type == 'tag') {
+            final ids = action['ids'] is List
+                ? (action['ids'] as List).map((e) => e.toString()).toList()
+                : null;
+            final name = action['name']?.toString();
+            if (ids != null && name != null && ids.isNotEmpty) {
+              objectsUpdated += drawingNotifier.tagStrokes(ids, name);
+            }
+            continue;
+          } else if (type == 'undo') {
+            final count = (action['count'] as num?)?.toInt() ?? 1;
+            for (int i = 0; i < count; i++) {
+              drawingNotifier.undo();
+            }
+            continue;
+          } else if (type == 'learn_rule') {
+            final rule = action['rule'] as String?;
+            if (rule != null) {
+              await MemoryService.addRule(rule);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('AI learned a new rule: $rule')),
+                );
+              }
+            }
+            continue;
+          } else if (type == 'delete_area' || type == 'erase_rect') {
+            final rectData = action['rect'] as List?;
+            if (rectData != null && rectData.length >= 4) {
+              final p1 = mapPoint(
+                rectData[0].toDouble(),
+                rectData[1].toDouble(),
+              );
+              final p2 = mapPoint(
+                rectData[0].toDouble() + rectData[2].toDouble(),
+                rectData[1].toDouble() + rectData[3].toDouble(),
+              );
+              final bounds = Rect.fromPoints(p1, p2);
+              drawingNotifier.eraseRect(bounds);
+            }
+            continue;
+          } else if (type == 'change_background') {
+            final colorHex = action['color']?.toString();
+            if (colorHex != null) {
+              Color? color;
+              try {
+                if (colorHex.startsWith('#')) {
+                  color = Color(
+                    int.parse(colorHex.substring(1), radix: 16) + 0xFF000000,
+                  );
+                } else {
+                  // Fallback for named colors
+                  if (colorHex.toLowerCase() == 'red') {
+                    color = Colors.red;
+                  } else if (colorHex.toLowerCase() == 'blue')
+                    color = Colors.blue;
+                  else if (colorHex.toLowerCase() == 'green')
+                    color = Colors.green;
+                  else if (colorHex.toLowerCase() == 'yellow')
+                    color = Colors.yellow;
+                  else if (colorHex.toLowerCase() == 'black')
+                    color = Colors.black;
+                  else if (colorHex.toLowerCase() == 'white')
+                    color = Colors.white;
+                  else
+                    color = Color(int.parse(colorHex));
+                }
+              } catch (_) {}
+
+              if (color != null) {
+                drawingNotifier.setCanvasBackgroundColor(color);
+                objectsUpdated++; // Prevent fallback
+              }
+            }
+            continue;
+          } else if (type == 'trigger_effect') {
+            String? effect =
+                (action['effect'] ??
+                        action['effectName'] ??
+                        action['name'] ??
+                        action['type'])
+                    ?.toString();
+            if (effect != null) {
+              drawingNotifier.triggerEasterEgg(effect);
+              objectsUpdated++; // Prevent fallback
+            }
+            continue;
+          } else if (type == 'insert_uml') {
+            final umlStr = action['plantuml']?.toString();
+            final posData = action['position'] as List?;
+            if (umlStr != null) {
+              double rawX = 100.0, rawY = 100.0;
+              if (posData != null && posData.length >= 2) {
+                rawX = posData[0].toDouble();
+                rawY = posData[1].toDouble();
+              }
+              final p = mapPoint(rawX, rawY);
+
+              final bytes = await PlantUmlService.fetchUmlImage(umlStr);
+              if (bytes != null && mounted) {
+                try {
+                  // Pre-decode the image so the bounding box is correct instantly
+                  final decodedImage = await decodeImageFromList(bytes);
+                  newStrokes.add(
+                    Stroke(
+                      points: [p],
+                      color: Colors.transparent,
+                      size: 1.0,
+                      toolType: ToolType.pan,
+                      imageBytes: bytes,
+                      decodedImage: decodedImage,
+                    ),
+                  );
+                } catch (e) {
+                  throw Exception("Failed to decode UML image: $e");
+                }
+              } else {
+                throw Exception("Failed to fetch UML image from PlantUML API.");
+              }
+            }
+            continue;
+          } else if (type == 'focus_area') {
+            final rectData = action['rect'] as List?;
+            if (rectData != null && rectData.length >= 4) {
+              double x = rectData[0].toDouble();
+              double y = rectData[1].toDouble();
+              double w = rectData[2].toDouble();
+              double h = rectData[3].toDouble();
+              final p1 = mapPoint(x, y);
+              final p2 = mapPoint(x + w, y + h);
+              final focusRect = Rect.fromPoints(p1, p2);
+
+              drawingNotifier.setLastAddedBounds(focusRect);
+              objectsUpdated++; // Ensure we don't count as fallback
+
+              // Immediately trigger focus without waiting for drawing
+              _eventBus.publish(
+                BaseEvent.generic(
+                  'aiTaskCompleted',
+                  payload: {'intent': CameraIntent.hardFocus},
+                ),
+              );
+            }
+            continue;
+          } else if (type == 'insert_widget') {
+            final widgetType = action['type']?.toString();
+            final posData = action['position'] as List?;
+            if (widgetType != null) {
+              double rawX = 100.0, rawY = 100.0;
+              if (posData != null && posData.length >= 2) {
+                rawX = posData[0].toDouble();
+                rawY = posData[1].toDouble();
+              }
+              final p = mapPoint(rawX, rawY);
+
+              final existingWidgets = ref.read(drawingProvider).strokes.where((
+                s,
+              ) {
+                if (s.toolType != ToolType.widget || s.text == null) {
+                  return false;
+                }
+                try {
+                  final j = jsonDecode(s.text!);
+                  return j['type'] ==
+                      widgetType; // Check if it's the same widget type (e.g. 'weather')
+                } catch (_) {
+                  return false;
+                }
+              }).toList();
+
+              if (existingWidgets.isNotEmpty) {
+                // If there's an existing widget of this type, we update it by deleting the old one
+                // and placing the new one at the exact same position!
+                final oldPos = existingWidgets.first.points.first;
+                drawingNotifier.eraseStrokes(existingWidgets);
+
+                final stroke = Stroke(
+                  points: [oldPos], // Keep the original position!
+                  color: Colors.transparent,
+                  size: 1.0,
+                  toolType: ToolType.widget,
+                  text: jsonEncode(action),
+                  groupId: 'widget_${DateTime.now().millisecondsSinceEpoch}',
+                );
+                newStrokes.add(stroke);
+              } else {
+                // Create completely new widget
+                final stroke = Stroke(
+                  points: [p],
+                  color: Colors.transparent,
+                  size: 1.0,
+                  toolType: ToolType.widget,
+                  text: jsonEncode(action),
+                  groupId: 'widget_${DateTime.now().millisecondsSinceEpoch}',
+                );
+                newStrokes.add(stroke);
+              }
+            }
+            continue;
+          } else if (type == 'generate_circuit') {
+            final components = action['components'] as List?;
+            final wires = action['wires'] as List?;
+
+            if (components != null) {
+              for (var c in components) {
+                final pos = c['position'] as List;
+                final p = mapPoint(pos[0].toDouble(), pos[1].toDouble());
+                final id = c['id'] as String;
+                final compType = c['type'] as String;
+
+                final stroke = Stroke(
+                  id: id,
+                  points: [p],
+                  color:
+                      Colors.transparent, // component handles its own drawing
+                  size: 40.0,
+                  toolType: ToolType.text,
+                  text: compType,
+                  groupId: 'circuit_${DateTime.now().millisecondsSinceEpoch}',
+                );
+                newStrokes.add(stroke);
+              }
+            }
+
+            if (wires != null) {
+              for (var w in wires) {
+                final source = w['source'] as String;
+                final target = w['target'] as String;
+
+                // split c1_out to sourceId: "c1", pinId: "c1_out"
+                final sourceId = source.split('_')[0];
+                final targetId = target.split('_')[0];
+
+                final stroke = Stroke(
+                  points:
+                      [], // engine will generate bezier points automatically based on metadata
+                  color: Colors.grey,
+                  size: 4.0,
+                  toolType: ToolType.wire,
+                  customMetadata: {
+                    'sourceId': sourceId,
+                    'targetId': targetId,
+                    'sourcePinId': source,
+                    'targetPinId': target,
+                  },
+                  groupId: 'circuit_${DateTime.now().millisecondsSinceEpoch}',
+                );
+                newStrokes.add(stroke);
+              }
+            }
+            objectsUpdated++;
+            continue;
+          } else if (type == 'apply_gravity') {
+            final targetGroupId = action['targetGroupId'] as String?;
+            final targetIds = action['targetIds'] as List?;
+
+            if (targetIds != null && targetIds.isNotEmpty) {
+              drawingNotifier.applyGravityToStrokes(targetIds.cast<String>());
+              aiFocusTargetId = targetIds.first;
+            } else if (targetGroupId != null) {
+              drawingNotifier.applyGravityToGroup(targetGroupId);
+            } else {
+              // Apply to the most recently added group if no target is specified
+              final currentStrokes = ref.read(drawingProvider).strokes;
+              if (currentStrokes.isNotEmpty) {
+                final lastGroupId = currentStrokes.last.groupId;
+                if (lastGroupId != null) {
+                  drawingNotifier.applyGravityToGroup(lastGroupId);
+                } else {
+                  drawingNotifier.applyGravityToStrokes([
+                    currentStrokes.last.id,
+                  ]);
+                }
+              }
+            }
+            objectsUpdated++; // Prevent fallback
+            continue;
+          } else if (type == 'apply_animation') {
+            final targetIds = action['targetIds'] as List?;
+            final animationType =
+                action['animationType'] as String? ?? 'bounce';
+
+            if (targetIds != null && targetIds.isNotEmpty) {
+              drawingNotifier.applyAnimationToStrokes(
+                targetIds.cast<String>(),
+                animationType,
+              );
+              aiFocusTargetId = targetIds.first;
+            } else {
+              final currentStrokes = ref.read(drawingProvider).strokes;
+              if (currentStrokes.isNotEmpty) {
+                drawingNotifier.applyAnimationToStrokes([
+                  currentStrokes.last.id,
+                ], animationType);
+                aiFocusTargetId = currentStrokes.last.id;
+              }
+            }
+            objectsUpdated++;
+            continue;
+          } else if (type == 'stop_simulation') {
+            drawingNotifier.stopSimulation();
+            objectsUpdated++;
+            continue;
+          }
+
+          final colorStr = action['color']?.toString() ?? '0xFF000000';
+          Color color = const Color(0xFF000000);
+          try {
+            if (colorStr.startsWith('#')) {
+              color = Color(
+                int.parse(colorStr.substring(1), radix: 16) + 0xFF000000,
+              );
+            } else if (colorStr.startsWith('0x') || colorStr.startsWith('0X')) {
+              color = Color(int.parse(colorStr.substring(2), radix: 16));
+            } else {
+              // Fallback for named colors
+              if (colorStr.toLowerCase() == 'red') {
+                color = Colors.red;
+              } else if (colorStr.toLowerCase() == 'blue')
+                color = Colors.blue;
+              else if (colorStr.toLowerCase() == 'green')
+                color = Colors.green;
+              else if (colorStr.toLowerCase() == 'yellow')
+                color = Colors.yellow;
+              else if (colorStr.toLowerCase() == 'black')
+                color = Colors.black;
+              else if (colorStr.toLowerCase() == 'white')
+                color = Colors.white;
+              else
+                color = Color(int.parse(colorStr));
+            }
+          } catch (_) {}
+
+          // --- ADAPTABILITY LOGIC ---
+          final bgColor =
+              ref.read(drawingProvider).canvasBackgroundColor ?? Colors.white;
+          final bgLum = bgColor.computeLuminance();
+          final colorLum = color.computeLuminance();
+
+          // If the AI's chosen color is too similar in brightness to the background, flip it!
+          if ((bgLum - colorLum).abs() < 0.25) {
+            color = bgLum > 0.5 ? Colors.black : Colors.white;
+          }
+
+          // Robustly parse size
+          double size = 8.0; // Default to 16.0 / 2.0
+          try {
+            final rawSize = action['size'];
+            if (rawSize is num) {
+              size = rawSize.toDouble() / 2.0;
+            } else if (rawSize is String) {
+              size = (double.tryParse(rawSize) ?? 16.0) / 2.0;
+            }
+          } catch (_) {}
+          final scale = inverse.getMaxScaleOnAxis();
+          size = size * scale; // Adjust line thickness relative to canvas zoom
+          final shapeFilled =
+              (action['isFilled'] ?? action['filled']) as bool? ?? false;
+          if (type == 'draw_rect') {
+            final rectData = action['rect'] as List?;
+            if (rectData == null || rectData.length < 4) continue;
+            final p1Raw = mapPoint(
+              rectData[0].toDouble(),
+              rectData[1].toDouble(),
+            );
+            final w = rectData[2].toDouble();
+            final h = rectData[3].toDouble();
+
+            final p = p1Raw;
+            double finalX = p.dx;
+            double finalY = p.dy;
+            double currentRadius = 0;
+            double angle = 0;
+            bool hasCollision = true;
+            int iterations = 0;
+
+            final overlap =
+                action['overlap'] == true || action['allowOverlap'] == true;
+            if (overlap) hasCollision = false;
+
+            while (hasCollision && iterations < 100) {
+              Rect newBounds = Rect.fromLTWH(
+                finalX - 10,
+                finalY - 10,
+                w + 20,
+                h + 20,
+              );
+              hasCollision = checkCollision(newBounds);
+
+              if (hasCollision) {
+                currentRadius += 20;
+                angle += 0.5; // spiral out
+                finalX = p.dx + currentRadius * math.cos(angle);
+                finalY = p.dy + currentRadius * math.sin(angle);
+              }
+              iterations++;
+            }
+
+            newStrokes.add(
+              AiStrokeGenerator.generateRect(
+                finalX,
+                finalY,
+                w,
+                h,
+                color,
+                size,
+                isFilled: shapeFilled,
+              ),
+            );
+          } else if (type == 'draw_circle') {
+            final center = action['center'] as List?;
+            if (center == null || center.length < 2) continue;
+            final p = mapPoint(center[0].toDouble(), center[1].toDouble());
+            final radius = ((action['radius'] as num).toDouble() / 2.0) * scale;
+
+            double finalX = p.dx;
+            double finalY = p.dy;
+            double currentRadius = 0;
+            double angle = 0;
+            bool hasCollision = true;
+            int iterations = 0;
+
+            final overlap =
+                action['overlap'] == true || action['allowOverlap'] == true;
+            if (overlap) hasCollision = false;
+
+            while (hasCollision && iterations < 100) {
+              Rect newBounds = Rect.fromLTWH(
+                finalX - radius - 10,
+                finalY - radius - 10,
+                (radius * 2) + 20,
+                (radius * 2) + 20,
+              );
+              hasCollision = checkCollision(newBounds);
+
+              if (hasCollision) {
+                currentRadius += 20;
+                angle += 0.5; // spiral out
+                finalX = p.dx + currentRadius * math.cos(angle);
+                finalY = p.dy + currentRadius * math.sin(angle);
+              }
+              iterations++;
+            }
+
+            newStrokes.add(
+              AiStrokeGenerator.generateCircle(
+                finalX,
+                finalY,
+                radius,
+                color,
+                size,
+                isFilled: shapeFilled,
+              ),
+            );
+          } else if (type == 'draw_polygon') {
+            final pointsData = action['points'] as List?;
+            if (pointsData == null || pointsData.length < 3) continue;
+            final mappedPoints = pointsData.map((pt) {
+              return mapPoint(
+                (pt[0] as num).toDouble(),
+                (pt[1] as num).toDouble(),
+              );
+            }).toList();
+            newStrokes.add(
+              AiStrokeGenerator.generatePolygon(
+                mappedPoints,
+                color,
+                size,
+                isFilled: shapeFilled,
+              ),
+            );
+          } else if (type == 'draw_line') {
+            final start = action['start'] as List?;
+            final end = action['end'] as List?;
+            if (start == null ||
+                start.length < 2 ||
+                end == null ||
+                end.length < 2) {
+              continue;
+            }
+            final p1 = mapPoint(start[0].toDouble(), start[1].toDouble());
+            final p2 = mapPoint(end[0].toDouble(), end[1].toDouble());
+            newStrokes.add(
+              AiStrokeGenerator.generateLine(
+                p1.dx,
+                p1.dy,
+                p2.dx,
+                p2.dy,
+                color,
+                size,
+              ),
+            );
+          } else if (type == 'draw_latex') {
+            final text = action['latex'] as String;
+            List? pos = action['position'] as List?;
+            if (pos == null || pos.length < 2) {
+              pos = [100.0, 100.0];
+            }
+
+            double rawX = pos[0].toDouble();
+            double rawY = pos[1].toDouble();
+
+            if (internalSafeY != null && rawY < internalSafeY) {
+              rawY = internalSafeY;
+            }
+            final linesCount = text.split('\n').length;
+            internalSafeY =
+                rawY +
+                (linesCount * 180) +
+                100; // Increased dynamic spacing for tall LaTeX equations
+
+            final p = mapPoint(rawX, rawY);
+            final scale = inverse.getMaxScaleOnAxis();
+
+            newStrokes.add(
+              Stroke(
+                points: [Offset(p.dx, p.dy)],
+                color: color,
+                size:
+                    (size * scale) *
+                    3.0, // Make LaTeX math equations highly readable
+                toolType: ToolType.latex,
+                text: text,
+              ),
+            );
+          } else if (type == 'draw_composite') {
+            final parts = action['parts'] as List?;
+            final pos = action['position'] as List?;
+            final compositeName = action['name'] as String? ?? 'composite';
+            final scaleModifier = (action['scale'] as num?)?.toDouble() ?? 1.0;
+
+            if (parts != null && pos != null && pos.length >= 2) {
+              double rawX = pos[0].toDouble();
+              double rawY = pos[1].toDouble();
+              final basePos = mapPoint(rawX, rawY);
+              final viewScale = inverse.getMaxScaleOnAxis();
+              final overallScale = viewScale * scaleModifier;
+
+              final groupId =
+                  '${compositeName}_${DateTime.now().millisecondsSinceEpoch}';
+
+              void parsePartsList(List partsList) {
+                for (var part in partsList) {
+                  if (part is! Map) continue;
+                  final partType = part['type'] as String?;
+                  final partColorHex = part['color'] as String?;
+                  Color partColor = color; // default to outer color
+                  if (partColorHex != null) {
+                    try {
+                      partColor = Color(
+                        int.parse(
+                              partColorHex
+                                  .replaceFirst('0x', '')
+                                  .replaceFirst('#', ''),
+                              radix: 16,
+                            ) +
+                            0xFF000000,
+                      );
+                    } catch (_) {}
+                  }
+                  final isFilled = part['isFilled'] as bool? ?? false;
+
+                  if (partType == 'circle') {
+                    final cx = (part['cx'] as num?)?.toDouble() ?? 0.0;
+                    final cy = (part['cy'] as num?)?.toDouble() ?? 0.0;
+                    final r = (part['r'] as num?)?.toDouble() ?? 20.0;
+                    final stroke = AiStrokeGenerator.generateCircle(
+                      basePos.dx + (cx * overallScale),
+                      basePos.dy + (cy * overallScale),
+                      r * overallScale,
+                      partColor,
+                      2.0 * viewScale,
+                    );
+                    newStrokes.add(
+                      stroke.copyWith(
+                        groupId: groupId,
+                        name: part['name']?.toString(),
+                        isFilled: isFilled,
+                        semanticMeaning: compositeName,
+                      ),
+                    );
+                  } else if (partType == 'ellipse') {
+                    final cx = (part['cx'] as num?)?.toDouble() ?? 0.0;
+                    final cy = (part['cy'] as num?)?.toDouble() ?? 0.0;
+                    final rx = (part['rx'] as num?)?.toDouble() ?? 30.0;
+                    final ry = (part['ry'] as num?)?.toDouble() ?? 20.0;
+                    final stroke = AiStrokeGenerator.generateEllipse(
+                      basePos.dx + (cx * overallScale),
+                      basePos.dy + (cy * overallScale),
+                      rx * overallScale,
+                      ry * overallScale,
+                      partColor,
+                      2.0 * viewScale,
+                    );
+                    newStrokes.add(
+                      stroke.copyWith(
+                        groupId: groupId,
+                        name: part['name']?.toString(),
+                        isFilled: isFilled,
+                        semanticMeaning: compositeName,
+                      ),
+                    );
+                  } else if (partType == 'rect') {
+                    final px = (part['x'] as num?)?.toDouble() ?? 0.0;
+                    final py = (part['y'] as num?)?.toDouble() ?? 0.0;
+                    final pw = (part['w'] as num?)?.toDouble() ?? 40.0;
+                    final ph = (part['h'] as num?)?.toDouble() ?? 40.0;
+                    final stroke = AiStrokeGenerator.generateRect(
+                      basePos.dx + (px * overallScale),
+                      basePos.dy + (py * overallScale),
+                      pw * overallScale,
+                      ph * overallScale,
+                      partColor,
+                      2.0 * viewScale,
+                    );
+                    newStrokes.add(
+                      stroke.copyWith(
+                        groupId: groupId,
+                        name: part['name']?.toString(),
+                        isFilled: isFilled,
+                        semanticMeaning: compositeName,
+                      ),
+                    );
+                  } else if (partType == 'line') {
+                    final x1 = (part['x1'] as num?)?.toDouble() ?? 0.0;
+                    final y1 = (part['y1'] as num?)?.toDouble() ?? 0.0;
+                    final x2 = (part['x2'] as num?)?.toDouble() ?? 0.0;
+                    final y2 = (part['y2'] as num?)?.toDouble() ?? 0.0;
+                    newStrokes.add(
+                      Stroke(
+                        groupId: groupId,
+                        name: part['name']?.toString(),
+                        semanticMeaning: compositeName,
+                        points: [
+                          Offset(
+                            basePos.dx + (x1 * overallScale),
+                            basePos.dy + (y1 * overallScale),
+                          ),
+                          Offset(
+                            basePos.dx + (x2 * overallScale),
+                            basePos.dy + (y2 * overallScale),
+                          ),
+                        ],
+                        color: partColor,
+                        size: 2.0 * viewScale,
+                        toolType: ToolType.pen,
+                      ),
+                    );
+                  } else if (partType == 'bezier_curve') {
+                    final p0 = part['p0'] as List? ?? [0, 0];
+                    final p1 = part['p1'] as List? ?? [0, 0];
+                    final p2 = part['p2'] as List? ?? [0, 0];
+                    final p3 = part['p3'] as List? ?? [0, 0];
+                    double safeNum(dynamic l, int idx) =>
+                        (l is List && l.length > idx && l[idx] != null)
+                        ? (l[idx] as num).toDouble()
+                        : 0.0;
+                    final stroke = AiStrokeGenerator.generateBezierCurve(
+                      Offset(
+                        basePos.dx + (safeNum(p0, 0) * overallScale),
+                        basePos.dy + (safeNum(p0, 1) * overallScale),
+                      ),
+                      Offset(
+                        basePos.dx + (safeNum(p1, 0) * overallScale),
+                        basePos.dy + (safeNum(p1, 1) * overallScale),
+                      ),
+                      Offset(
+                        basePos.dx + (safeNum(p2, 0) * overallScale),
+                        basePos.dy + (safeNum(p2, 1) * overallScale),
+                      ),
+                      Offset(
+                        basePos.dx + (safeNum(p3, 0) * overallScale),
+                        basePos.dy + (safeNum(p3, 1) * overallScale),
+                      ),
+                      partColor,
+                      2.0 * viewScale,
+                    );
+                    newStrokes.add(
+                      stroke.copyWith(
+                        groupId: groupId,
+                        name: part['name']?.toString(),
+                        semanticMeaning: compositeName,
+                      ),
+                    );
+                  } else if (partType == 'organic_path') {
+                    final bPts =
+                        part['base_points'] as List? ??
+                        [
+                          [0, 0],
+                        ];
+                    final nl = (part['noise_level'] as num?)?.toDouble() ?? 3.0;
+                    double safeNum(dynamic l, int idx) =>
+                        (l is List && l.length > idx && l[idx] != null)
+                        ? (l[idx] as num).toDouble()
+                        : 0.0;
+                    List<Offset> mapped = bPts
+                        .map(
+                          (pt) => Offset(
+                            basePos.dx + (safeNum(pt, 0) * overallScale),
+                            basePos.dy + (safeNum(pt, 1) * overallScale),
+                          ),
+                        )
+                        .toList();
+                    final stroke = AiStrokeGenerator.generateOrganicPath(
+                      mapped,
+                      nl * overallScale,
+                      partColor,
+                      2.0 * viewScale,
+                    );
+                    newStrokes.add(
+                      stroke.copyWith(
+                        groupId: groupId,
+                        name: part['name']?.toString(),
+                        isFilled: isFilled,
+                        semanticMeaning: compositeName,
+                      ),
+                    );
+                  } else if (partType == 'polygon') {
+                    final pts =
+                        part['points'] as List? ??
+                        [
+                          [0, 0],
+                        ];
+                    double safeNum(dynamic l, int idx) =>
+                        (l is List && l.length > idx && l[idx] != null)
+                        ? (l[idx] as num).toDouble()
+                        : 0.0;
+                    List<Offset> mapped = pts
+                        .map(
+                          (pt) => Offset(
+                            basePos.dx + (safeNum(pt, 0) * overallScale),
+                            basePos.dy + (safeNum(pt, 1) * overallScale),
+                          ),
+                        )
+                        .toList();
+                    final stroke = AiStrokeGenerator.generatePolygon(
+                      mapped,
+                      partColor,
+                      2.0 * viewScale,
+                    );
+                    newStrokes.add(
+                      stroke.copyWith(
+                        groupId: groupId,
+                        name: part['name']?.toString(),
+                        isFilled: isFilled,
+                        semanticMeaning: compositeName,
+                      ),
+                    );
+                  }
+
+                  if (part['details'] is List) {
+                    parsePartsList(part['details'] as List);
+                  }
+                }
+              }
+
+              parsePartsList(parts);
+            }
+          } else if (type == 'draw_svg') {
+            final pathData = action['path'] as String?;
+            final pos = action['position'] as List?;
+            final id =
+                action['id'] as String? ??
+                DateTime.now().millisecondsSinceEpoch.toString();
+
+            if (pathData != null) {
+              final p = pos != null && pos.length >= 2
+                  ? mapPoint(pos[0].toDouble(), pos[1].toDouble())
+                  : mapPoint(100.0, 100.0);
+              final scale = inverse.getMaxScaleOnAxis();
+
+              final svgScale = (action['scale'] as num?)?.toDouble() ?? 1.0;
+              final isFilled =
+                  (action['isFilled'] ?? action['filled']) as bool? ?? false;
+
+              try {
+                final parsedPath = parseSvgPathData(pathData);
+
+                // Move and scale the path
+                final matrix = Matrix4.identity()
+                  ..translate(p.dx, p.dy)
+                  ..scale(svgScale * scale * 2.0);
+
+                final transformedPath = parsedPath.transform(matrix.storage);
+
+                for (var metric in transformedPath.computeMetrics()) {
+                  List<Offset> extractedPoints = [];
+                  for (double i = 0; i < metric.length; i += 4.0) {
+                    // Increased step for performance
+                    final tangent = metric.getTangentForOffset(i);
+                    if (tangent != null) extractedPoints.add(tangent.position);
+                  }
+                  if (extractedPoints.isNotEmpty) {
+                    newStrokes.add(
+                      Stroke(
+                        groupId: id,
+                        name: 'svg_shape',
+                        points: extractedPoints,
+                        color: color,
+                        size: 2.0 * scale,
+                        toolType: ToolType.pen,
+                        isFilled: isFilled,
+                      ),
+                    );
+                  }
+                  if (_cancelRequested) {
+                    throw Exception("Cancelled by user");
+                  }
+                  // Yield to event loop to keep UI responsive
+                  await Future.delayed(Duration.zero);
+                }
+              } catch (e) {
+                debugPrint("WARNING: Failed to parse SVG path: $e");
+                rethrow; // Rethrow so the global operation error handler catches it
+              }
+            }
+          } else if (type == 'draw_template') {
+            final textName = action['name'] as String;
+            final pos = action['position'] as List?;
+            final id =
+                action['id'] as String? ??
+                DateTime.now().millisecondsSinceEpoch.toString();
+
+            final p = pos != null && pos.length >= 2
+                ? mapPoint(pos[0].toDouble(), pos[1].toDouble())
+                : mapPoint(100.0, 100.0);
+            final scale = inverse.getMaxScaleOnAxis();
+
+            final replaceName = action['replace'] as String?;
+            if (replaceName != null) {
+              final strokesToRemove = ref.read(drawingProvider).strokes.where((
+                s,
+              ) {
+                return s.name == replaceName || s.groupId == replaceName;
+              }).toList();
+              if (strokesToRemove.isNotEmpty) {
+                ref
+                    .read(drawingProvider.notifier)
+                    .eraseStrokes(strokesToRemove);
+              }
+            }
+
+            // Collision avoidance via radial search (bypassed if overlap is requested)
+            final overlap =
+                action['overlap'] == true || action['allowOverlap'] == true;
+
+            double finalX = p.dx;
+            double finalY = p.dy;
+            double radius = 0;
+            double angle = 0;
+            bool hasCollision = !overlap;
+
+            double shapeSize = (size * scale) * 3.0;
+
+            int iterations = 0;
+            while (hasCollision && iterations < 100) {
+              Rect newBounds = Rect.fromLTWH(
+                finalX - 20,
+                finalY - 20,
+                shapeSize + 40,
+                shapeSize + 40,
+              );
+              hasCollision = checkCollision(newBounds);
+
+              if (hasCollision) {
+                radius += 20;
+                angle += 0.5; // spiral out
+                finalX = p.dx + radius * math.cos(angle);
+                finalY = p.dy + radius * math.sin(angle);
+              }
+              iterations++;
+            }
+
+            final path = SketchTemplates.getPath(
+              textName,
+              finalX,
+              finalY,
+              size *
+                  2.0, // Pass the actual size parameter instead of hardcoded 100
+            );
+
+            final isFilled =
+                (action['isFilled'] ?? action['filled']) as bool? ?? true;
+            for (var metric in path.computeMetrics()) {
+              List<Offset> extractedPoints = [];
+              for (double i = 0; i < metric.length; i += 4.0) {
+                // Increased step for performance
+                final tangent = metric.getTangentForOffset(i);
+                if (tangent != null) extractedPoints.add(tangent.position);
+              }
+              newStrokes.add(
+                Stroke(
+                  groupId: id, // Template grouping!
+                  name: textName,
+                  points: extractedPoints,
+                  color: color,
+                  size: 2.0 * scale,
+                  toolType: ToolType.pen,
+                  isFilled: isFilled,
+                ),
+              );
+              // Yield to event loop to keep UI responsive
+              await Future.delayed(Duration.zero);
+            }
+          } else if (type == 'draw_text') {
+            final text = action['text'] as String;
+            List? pos = action['position'] as List?;
+            if (pos == null || pos.length < 2) {
+              pos = [100.0, 100.0];
+            }
+
+            double rawX = pos[0].toDouble();
+            double rawY = pos[1].toDouble();
+
+            if (internalSafeY != null && rawY < internalSafeY) {
+              rawY = internalSafeY;
+            }
+            final linesCount = text.split('\n').length;
+            internalSafeY = rawY + (linesCount * 70) + 50;
+
+            final p = mapPoint(rawX, rawY);
+            final scale = inverse.getMaxScaleOnAxis();
+
+            double finalX = p.dx;
+            double finalY = p.dy;
+            double radius = 0;
+            double angle = 0;
+            bool hasCollision = true;
+
+            final lines = text.split('\n');
+            final maxLineLength = lines.isEmpty
+                ? 0
+                : lines.map((l) => l.length).reduce((a, b) => a > b ? a : b);
+            final textWidth = maxLineLength * (size * scale) * 3.0 * 0.6;
+            final textHeight = linesCount * (size * scale) * 3.0 * 1.5;
+
+            int iterations = 0;
+            while (hasCollision && iterations < 100) {
+              // Provide a generous buffer around the text
+              Rect newBounds = Rect.fromCenter(
+                center: Offset(
+                  finalX + textWidth / 2.0,
+                  finalY + textHeight / 2.0,
+                ),
+                width: textWidth + 80,
+                height: textHeight + 60,
+              );
+              hasCollision = checkCollision(newBounds);
+
+              if (hasCollision) {
+                radius += 20;
+                angle += 0.5; // spiral out
+                finalX = p.dx + radius * math.cos(angle);
+                finalY = p.dy + radius * math.sin(angle);
+              }
+              iterations++;
+            }
+
+            newStrokes.add(
+              AiStrokeGenerator.generateText(
+                text,
+                finalX,
+                finalY,
+                color,
+                18.0, // Fixed 18px font size in canvas space — consistent at all zoom levels
+              ),
+            );
+          } else if (type == 'draw_wire') {
+            final start = action['start'] as List?;
+            final end = action['end'] as List?;
+            if (start != null &&
+                end != null &&
+                start.length >= 2 &&
+                end.length >= 2) {
+              final p1 = mapPoint(start[0].toDouble(), start[1].toDouble());
+              final p2 = mapPoint(end[0].toDouble(), end[1].toDouble());
+              newStrokes.add(
+                Stroke(
+                  points: [p1, p2],
+                  color: color,
+                  size: size * scale,
+                  toolType: ToolType.wire,
+                ),
+              );
+            }
+          } else if (type == 'draw_portal') {
+            final pos = action['position'] as List?;
+            final r = (action['radius'] as num?)?.toDouble() ?? 40.0;
+            if (pos != null && pos.length >= 2) {
+              final p = mapPoint(pos[0].toDouble(), pos[1].toDouble());
+              newStrokes.add(
+                Stroke(
+                  points: [p, Offset(p.dx + r * 2, p.dy + r * 2)],
+                  color: color,
+                  size: size * scale,
+                  toolType: ToolType.portal,
+                ),
+              );
+            }
+          } else if (type == 'insert_chemistry') {
+            final formula = action['formula'] as String?;
+            List? pos = action['position'] as List?;
+            if (formula != null) {
+              final rawP = pos != null && pos.length >= 2
+                  ? mapPoint(pos[0].toDouble(), pos[1].toDouble())
+                  : mapPoint(100.0, 100.0);
+              final scale = inverse.getMaxScaleOnAxis();
+
+              Offset p = rawP;
+              // Prevent stacking if AI generated multiple items at the exact same coordinate
+              if (lastRequestedPos != null &&
+                  (rawP.dx - lastRequestedPos.dx).abs() < 5 &&
+                  (rawP.dy - lastRequestedPos.dy).abs() < 5) {
+                p = Offset(lastPlacedPos!.dx + 380.0 * scale, lastPlacedPos.dy);
+                if (p.dx >
+                    (targetTopLeft?.dx ?? mapPoint(100.0, 100.0).dx) +
+                        1500.0 * scale) {
+                  // wrap to next row
+                  p = Offset(rawP.dx, lastPlacedPos.dy + 380.0 * scale);
+                }
+              }
+              lastRequestedPos = rawP;
+              lastPlacedPos = p;
+
+              // NEW: fetch molecule via ChemistryService (plain JSON/SDF text ├óÔé¼ÔÇØ
+              // no CORS issues, no raster PNG, no BlendMode hacks).
+              final mol = await ChemistryService.fetchMolecule(formula);
+              if (mol == null) {
+                throw Exception('Could not find molecule data for: $formula');
+              }
+              newStrokes.add(
+                Stroke(
+                  points: [Offset(p.dx, p.dy)],
+                  color: color,
+                  size: 1.0,
+                  toolType: ToolType.pen,
+                  smiles: formula, // persisted key for re-fetch after reload
+                  chemMolecule:
+                      mol, // already loaded ├óÔé¼ÔÇØ no spinner needed
+                  text: 'chemistry', // kept for scene graph semantic tag
+                ),
+              );
+            }
+          } else if (type == 'generate_image') {
+            final prompt = action['prompt'] as String?;
+            List? pos = action['position'] as List?;
+            if (prompt != null) {
+              final rawP = pos != null && pos.length >= 2
+                  ? mapPoint(pos[0].toDouble(), pos[1].toDouble())
+                  : mapPoint(100.0, 100.0);
+              final scale = inverse.getMaxScaleOnAxis();
+
+              Offset p = rawP;
+              double finalX = p.dx;
+              double finalY = p.dy;
+              double radius = 0;
+              double angle = 0;
+              bool hasCollision = true;
+              widget.onDrawStart?.call(); // added onDrawStart
+              int iterations = 0;
+              while (hasCollision && iterations < 100) {
+                Rect newBounds = Rect.fromLTWH(
+                  finalX - 20,
+                  finalY - 20,
+                  512.0 * scale + 40.0,
+                  512.0 * scale + 40.0,
+                );
+                hasCollision = checkCollision(newBounds);
+
+                if (hasCollision) {
+                  radius += 20;
+                  angle += 0.5; // spiral out
+                  finalX = p.dx + radius * math.cos(angle);
+                  finalY = p.dy + radius * math.sin(angle);
+                }
+                iterations++;
+              }
+              p = Offset(finalX, finalY);
+
+              final seed = DateTime.now().millisecondsSinceEpoch;
+              final url =
+                  'https://vinciboard-alpha.vercel.app/api/image?prompt=${Uri.encodeComponent(prompt)}&seed=$seed&width=512&height=512';
+
+              final response = await http
+                  .get(Uri.parse(url))
+                  .timeout(
+                    const Duration(seconds: 30),
+                    onTimeout: () => throw Exception(
+                      'Image generation timed out after 30 seconds',
+                    ),
+                  );
+              if (response.statusCode != 200) {
+                throw Exception(
+                  'Image generation failed: ${response.statusCode}',
+                );
+              }
+              final imageBytes = response.bodyBytes;
+              final decodedImage = await decodeImageFromList(imageBytes);
+              newStrokes.add(
+                Stroke(
+                  points: [Offset(p.dx, p.dy)],
+                  color: color,
+                  size: 1.0,
+                  toolType: ToolType.pen,
+                  imageBytes: imageBytes,
+                  decodedImage: decodedImage,
+                ),
+              );
+            }
+          } else {
+            debugPrint("WARNING: Unrecognized AI action type: $type");
+            unrecognized.add(type.toString());
+          }
+        } catch (e, st) {
+          debugPrint("CRITICAL ERROR executing action '$type': $e\n$st");
+          final p = mapPoint(100.0, (internalSafeY ?? 100.0) + 100.0);
+          newStrokes.add(
+            Stroke(
+              points: [p],
+              color: Colors.red,
+              size: 1.0,
+              toolType: ToolType.pen,
+              text: "├░┼©┼í┬¿ FAILED: $type\nError: $e",
+            ),
+          );
+          // Advance safeY so next fallback stroke doesn't overlap this one
+          internalSafeY = (internalSafeY ?? 100.0) + 150.0;
+        }
+      }
+    }
+
+    if (!mounted) return "";
+
+    // Unified collision detection and auto-layout for all new AI strokes
+    final currentStrokes = ref.read(drawingProvider).strokes;
+    if (newStrokes.isNotEmpty && currentStrokes.isNotEmpty) {
+      double eMinX = double.infinity, eMinY = double.infinity;
+      double eMaxX = double.negativeInfinity, eMaxY = double.negativeInfinity;
+      for (var stroke in currentStrokes) {
+        for (var p in stroke.points) {
+          double pMaxY = p.dy;
+          if (stroke.decodedImage != null) {
+            pMaxY += stroke.decodedImage!.height;
+          } else if (stroke.text != null)
+            pMaxY += (stroke.text!.split('\n').length) * stroke.size * 2.5;
+          if (p.dx < eMinX) eMinX = p.dx;
+          if (p.dy < eMinY) eMinY = p.dy;
+          if (p.dx > eMaxX) eMaxX = p.dx;
+          if (pMaxY > eMaxY) eMaxY = pMaxY;
+        }
+      }
+
+      double nMinX = double.infinity, nMinY = double.infinity;
+      double nMaxX = double.negativeInfinity, nMaxY = double.negativeInfinity;
+      for (var stroke in newStrokes) {
+        for (var p in stroke.points) {
+          double pMaxY = p.dy;
+          if (stroke.decodedImage != null) {
+            pMaxY += stroke.decodedImage!.height;
+          } else if (stroke.text != null)
+            pMaxY += (stroke.text!.split('\n').length) * stroke.size * 2.5;
+          if (p.dx < nMinX) nMinX = p.dx;
+          if (p.dy < nMinY) nMinY = p.dy;
+          if (p.dx > nMaxX) nMaxX = p.dx;
+          if (pMaxY > nMaxY) nMaxY = pMaxY;
+        }
+      }
+
+      // Removed strict auto-layout. We must trust the AI's spatial coordinates so it can draw things around/next to other objects!
+    }
+
+    // INTERCEPT removed: The AI is now 'smart' enough to handle its own spatial reasoning based on the updated System Note.
+    // It will use targetTopLeft for new chat responses, but original coordinates for object modifications.
+    /*
+    if (newStrokes.isNotEmpty && targetTopLeft != null) {
+      double minX = double.infinity, minY = double.infinity;
+      double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+      for (var s in newStrokes) {
+        for (var p in s.points) {
+          if (p.dx < minX) minX = p.dx;
+          if (p.dy < minY) minY = p.dy;
+          if (p.dx > maxX) maxX = p.dx;
+          if (p.dy > maxY) maxY = p.dy;
+        }
+      }
+      
+      if (minX != double.infinity) {
+        final currentTopLeft = Offset(minX, minY);
+        final shift = targetTopLeft - currentTopLeft;
+        
+        for (int i = 0; i < newStrokes.length; i++) {
+          final s = newStrokes[i];
+          final shiftedPoints = s.points.map((p) => p + shift).toList();
+          newStrokes[i] = s.copyWith(points: shiftedPoints);
+        }
+      }
+    }
+    */
+
+    double? finalMaxY;
+    if (newStrokes.isNotEmpty) {
+      double minX = double.infinity, minY = double.infinity, maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+      for (var s in newStrokes) {
+        final b = s.bounds;
+        if (b.left < minX) minX = b.left;
+        if (b.top < minY) minY = b.top;
+        if (b.right > maxX) maxX = b.right;
+        if (b.bottom > maxY) maxY = b.bottom;
+      }
+      if (maxX != double.negativeInfinity) {
+        final bounds = Rect.fromLTRB(minX, minY, maxX, maxY);
+        drawingNotifier.setLastAddedBounds(bounds);
+
+        CognitiveRuntime().avatarEngine.moveTo(bounds.center);
+        CognitiveRuntime().avatarEngine.setState(AvatarState.generating);
+
+        finalMaxY = maxY;
+
+        // --- COGNITIVE SPATIAL OS: Graph Registration ---
+        final spatialRegistry = ref.read(spatialRegistryProvider.notifier);
+        final parentId = ref.read(drawingProvider).selectedStrokes.isNotEmpty
+            ? ref.read(drawingProvider).selectedStrokes.first.groupId
+            : null;
+
+        final node = SpatialNode(
+          groupId:
+              newStrokes.first.groupId ??
+              'generated_${DateTime.now().millisecondsSinceEpoch}',
+          clusterId:
+              parentId ?? 'root_${DateTime.now().millisecondsSinceEpoch}',
+          parentId: parentId,
+          bounds: bounds,
+          depth: parentId != null
+              ? (spatialRegistry.getNode(parentId)?.depth ?? 0) + 1
+              : 0,
+          orderIndex: 0,
+          semanticType: parentId == null
+              ? SemanticType.root
+              : SemanticType.expansion,
+        );
+        spatialRegistry.registerNode(node);
+
+        // --- COGNITIVE SPATIAL OS: Camera Perception ---
+        final isRoot = parentId == null;
+        final intent = SemanticCameraIntelligence.determineIntent(
+          userState: UserIntentState.follow, // User waiting for AI
+          nodeDepth: node.depth,
+          isRoot: isRoot,
+          isFullyOffscreen:
+              true, // We assume true for new AI generations to trigger softGuide
+        );
+        _eventBus.publish(
+          BaseEvent.generic('aiTaskCompleted', payload: {'intent': intent}),
+        );
+      }
+    } else if (objectsAdded > 0 || objectsUpdated > 0) {
+      // Also focus if we inserted widgets or images directly
+      _eventBus.publish(
+        BaseEvent.generic(
+          'aiTaskCompleted',
+          payload: {
+            'intent': CameraIntent.userAssistedFocus,
+            'targetStrokeId': aiFocusTargetId,
+          },
+        ),
+      );
+    }
+
+    if (newStrokes.isNotEmpty || objectsAdded > 0) {
+      drawingNotifier.setAiStatus(null);
+    }
+
+    if (newStrokes.isNotEmpty) {
+      objectsAdded += newStrokes.length;
+      if (isAnimateFrame) {
+        drawingNotifier.addStrokes(newStrokes);
+      } else {
+        await drawingNotifier.animateStrokes(newStrokes);
+      }
+    }
+
+    // onDrawEnd is now handled in the finally block of _sendMessage
+
+    final summaryParts = <String>[];
+    if (objectsAdded > 0) {
+      summaryParts.add("$objectsAdded টি নতুন অবজেক্ট যুক্ত হয়েছে");
+    }
+    if (objectsUpdated > 0) {
+      summaryParts.add("$objectsUpdated টি অবজেক্ট আপডেট হয়েছে");
+    }
+    if (objectsRemoved > 0) {
+      summaryParts.add("$objectsRemoved টি অবজেক্ট মুছে ফেলা হয়েছে");
+    }
+    if (unrecognized.isNotEmpty) {
+      summaryParts.add(
+        "Warning: Unknown actions skipped (${unrecognized.join(', ')})",
+      );
+    }
+
+    return summaryParts.isEmpty ? "" : "${summaryParts.join(", ")}।";

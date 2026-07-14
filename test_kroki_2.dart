@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 void main() async {
@@ -50,10 +51,10 @@ stop
     headers: {'Content-Type': 'text/plain'},
   );
 
-  print('Kroki POST status: \${response.statusCode}');
-  print('Kroki POST bytes: \${response.bodyBytes.length}');
+  debugPrint('Kroki POST status: \${response.statusCode}');
+  debugPrint('Kroki POST bytes: \${response.bodyBytes.length}');
 
   if (response.bodyBytes.length < 1500) {
-    print('Small image, might be an error image or invalid PNG?');
+    debugPrint('Small image, might be an error image or invalid PNG?');
   }
 }

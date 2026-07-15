@@ -166,6 +166,7 @@ class AchievementsDialog extends ConsumerWidget {
                 style: TextStyle(
                   fontSize: 24,
                   color: unlocked ? null : Colors.transparent,
+                  fontFamilyFallback: const ['NotoColorEmoji', 'NotoSans'],
                 ),
               ),
             ),

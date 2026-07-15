@@ -456,37 +456,47 @@ class CanvasWidgetState extends ConsumerState<CanvasWidget>
                           // Ensure we don't fetch more than 7 days
                           final safeDays = requestedDays.clamp(1, 7);
                           content = WeatherWidget(
+                            key: ValueKey('weather_${stroke.id}'),
                             city: json['city'] ?? 'London',
                             days: safeDays,
                           );
                         } else if (type == 'graph') {
                           final expr = json['expression'] ?? 'x^2';
                           content = GraphRenderer(
+                            key: ValueKey('graph_${stroke.id}'),
                             mathExpression: expr,
                             graphingEngine: GraphingEngine(),
                           );
                         } else if (type == 'anatomy') {
                           content = AnatomyViewer(
+                            key: ValueKey('anatomy_${stroke.id}'),
                             simulator: AnatomySimulator(),
                           );
                         } else if (type == 'cellular') {
                           content = CellularVisualizer(
+                            key: ValueKey('cellular_${stroke.id}'),
                             simulator: CellularSimulator(),
                           );
                         } else if (type == 'genetics') {
                           content = GeneticsVisualizer(
+                            key: ValueKey('genetics_${stroke.id}'),
                             simulator: GeneticsSimulator(),
                           );
                         } else if (type == 'beaker') {
-                          content = const BeakerWidget();
+                          content = BeakerWidget(
+                            key: ValueKey('beaker_${stroke.id}'),
+                          );
                         } else if (type == 'microscope') {
-                          content = const MicroscopeWidget();
+                          content = MicroscopeWidget(
+                            key: ValueKey('microscope_${stroke.id}'),
+                          );
                         }
                       } catch (e) {
                         // ignore parsing errors
                       }
 
                       return Positioned(
+                        key: ValueKey('pos_${stroke.id}'),
                         left: stroke.points.first.dx,
                         top: stroke.points.first.dy,
                         child: Transform.rotate(

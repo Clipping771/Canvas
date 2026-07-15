@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
@@ -25,17 +26,118 @@ import 'package:vinci_board/engines/chemistry/chemistry_service.dart';
 import 'package:vinci_board/core/utils/sketch_templates.dart';
 import 'package:vinci_board/presentation/providers/spatial_registry_provider.dart';
 import 'package:vinci_board/core/models/spatial_node.dart';
+import 'package:string_similarity/string_similarity.dart';
 
 class AiExecutionController {
   final Ref ref;
   bool _cancelRequested = false;
   final EventBus _eventBus = EventBus();
+
+  // Typewriter animation state
+  String _targetMessageText = '';
+  String _currentMessageText = '';
+  Timer? _typewriterTimer;
+  String? _activeStreamStrokeId;
+  DrawingNotifier? _activeDrawingNotifier;
+  bool _streamDone = false;
   
   AiExecutionController(this.ref);
 
+  void _logDebug(String msg) {
+    try {
+      final file = File(r'C:\Users\kaush\.gemini\antigravity-ide\scratch\ai_log.txt');
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync('${DateTime.now().toIso8601String()}: $msg\n', mode: FileMode.append, flush: true);
+    } catch (_) {}
+  }
+
   void cancel() {
     _cancelRequested = true;
+    _logDebug('cancel() requested. Canceling typewriter timer.');
+    _typewriterTimer?.cancel();
+    _typewriterTimer = null;
     AiAgentService.cancelRequest();
+  }
+
+  void _startTypewriter(String streamStrokeId, DrawingNotifier drawingNotifier) {
+    _typewriterTimer?.cancel();
+    _activeStreamStrokeId = streamStrokeId;
+    _activeDrawingNotifier = drawingNotifier;
+    _currentMessageText = '';
+    _streamDone = false;
+    _logDebug('Typewriter started for stroke: $streamStrokeId');
+    
+    int lastLoggedTargetLength = -1;
+    _typewriterTimer = Timer.periodic(const Duration(milliseconds: 60), (timer) {
+      if (_activeStreamStrokeId == null || _activeDrawingNotifier == null || _cancelRequested) {
+        _logDebug('Typewriter timer cancelled. _activeStreamStrokeId: $_activeStreamStrokeId, _activeDrawingNotifier: $_activeDrawingNotifier, _cancelRequested: $_cancelRequested');
+        timer.cancel();
+        return;
+      }
+      
+      final diff = _targetMessageText.length - _currentMessageText.length;
+      if (diff <= 0) {
+        if (_streamDone) {
+          _logDebug('Typewriter caught up and stream is done. Finalizing...');
+          timer.cancel();
+          _finalizeTypewriter();
+        }
+        return;
+      }
+      
+      if (_targetMessageText.length != lastLoggedTargetLength) {
+        lastLoggedTargetLength = _targetMessageText.length;
+        _logDebug('Typewriter processing: targetLength=${_targetMessageText.length}, currentLength=${_currentMessageText.length}');
+      }
+      
+      // Adaptive speed: add characters faster if we fall behind the stream
+      int charsToAdd = 2; // Increased base speed
+      if (diff > 60) {
+        charsToAdd = 10;
+      } else if (diff > 25) {
+        charsToAdd = 5;
+      }
+      
+      final nextLength = math.min(_currentMessageText.length + charsToAdd, _targetMessageText.length);
+      _currentMessageText = _targetMessageText.substring(0, nextLength);
+      
+      _activeDrawingNotifier!.updateStrokeByIdSilent(
+        _activeStreamStrokeId!,
+        (s) => s.copyWith(
+          text: _currentMessageText,
+          color: Colors.blue.shade900,
+          version: s.version + 1,
+        ),
+      );
+    });
+  }
+
+  void _finalizeTypewriter() {
+    _logDebug('Typewriter finalizing: targetTextLength=${_targetMessageText.length}');
+    _typewriterTimer?.cancel();
+    _typewriterTimer = null;
+    if (_activeStreamStrokeId != null && _activeDrawingNotifier != null) {
+      final finalText = _unescapeJsonString(_targetMessageText);
+      if (finalText.trim().isEmpty) {
+        _logDebug('Finalizing: target text is empty, deleting stroke: $_activeStreamStrokeId');
+        _activeDrawingNotifier!.updateStrokeById(_activeStreamStrokeId!, (s) => s.copyWith(isLocked: false), force: true);
+        _activeDrawingNotifier!.deleteStroke(_activeStreamStrokeId!);
+      } else {
+        _logDebug('Finalizing: setting final text (length=${finalText.length}) on stroke: $_activeStreamStrokeId');
+        _activeDrawingNotifier!.updateStrokeById(
+          _activeStreamStrokeId!,
+          (s) => s.copyWith(
+            text: finalText,
+            color: Colors.black,
+            isLocked: false,
+            version: s.version + 1,
+          ),
+          force: true,
+        );
+      }
+    }
+    _activeStreamStrokeId = null;
+    _activeDrawingNotifier = null;
   }
 
   Future<void> askAi({
@@ -92,10 +194,31 @@ class AiExecutionController {
 
       final responsePosition = Offset(promptCanvasPosition.dx, bottomY);
       final streamStrokeId = drawingNotifier.placeText("Thinking...", responsePosition);
-      drawingNotifier.updateStrokeById(streamStrokeId, (s) => s.copyWith(isLocked: true, color: Colors.grey), force: true);
+      drawingNotifier.updateStrokeById(
+        streamStrokeId,
+        (s) => s.copyWith(
+          isLocked: true,
+          color: Colors.grey,
+          customMetadata: const {'isAiGenerated': true},
+        ),
+        force: true,
+      );
+
+      try {
+        final file = File(r'C:\Users\kaush\.gemini\antigravity-ide\scratch\ai_log.txt');
+        file.parent.createSync(recursive: true);
+        file.writeAsStringSync('--- START LOG ---\n', flush: true);
+      } catch (_) {}
+
+      _logDebug('askAi started: prompt="$prompt"');
 
       String response = '';
       final Completer<void> completer = Completer<void>();
+
+      _targetMessageText = '';
+      _currentMessageText = '';
+      _streamDone = false;
+      _startTypewriter(streamStrokeId, drawingNotifier);
 
       final relativePrompt = "$prompt\n\n[System Context: The user's prompt is written on the canvas at (${promptCanvasPosition.dx.toStringAsFixed(1)}, ${promptCanvasPosition.dy.toStringAsFixed(1)}). The bottom bounds of their prompt is at y = ${bottomY.toStringAsFixed(1)}. You MUST place all your generated text, drawings, and widgets ('ops') BELOW this prompt, starting at y = ${(bottomY + 15).toStringAsFixed(1)}.]";
 
@@ -110,37 +233,47 @@ class AiExecutionController {
       );
 
       bool isWorking = false;
-      int lastUpdateTime = 0;
 
       StreamSubscription<String>? subscription;
+      _logDebug('Subscribing to stream...');
       subscription = stream.listen(
         (chunk) {
-          if (_cancelRequested) {
-            subscription?.cancel();
-            if (!completer.isCompleted) completer.complete();
-            return;
-          }
-          if (!isWorking) {
-            isWorking = true;
-            drawingNotifier.setAiStatus('Working', target: promptCanvasPosition);
-          }
-          response = chunk;
-          
-          final now = DateTime.now().millisecondsSinceEpoch;
-          if (now - lastUpdateTime > 48) { // throttle to ~20 fps
+          try {
+            if (_cancelRequested) {
+              _logDebug('Stream onData: cancel requested, canceling subscription.');
+              subscription?.cancel();
+              _typewriterTimer?.cancel();
+              _typewriterTimer = null;
+              if (!completer.isCompleted) completer.complete();
+              return;
+            }
+            if (!isWorking) {
+              isWorking = true;
+              _logDebug('Stream onData: setting status to Working...');
+              drawingNotifier.setAiStatus('Working', target: promptCanvasPosition);
+            }
+            response = chunk;
+            _logDebug('Stream onData chunk received (length=${chunk.length})');
+            
             final extracted = _extractMessageFromPartialJson(chunk);
             if (extracted.trim().isNotEmpty) {
-              drawingNotifier.updateStrokeById(streamStrokeId, (s) => s.copyWith(text: extracted, color: Colors.blue.shade900, version: s.version + 1), force: true);
+              _targetMessageText = _unescapeJsonString(extracted);
             }
-            lastUpdateTime = now;
+          } catch (e, st) {
+            _logDebug('ERROR in stream callback: $e\n$st');
+            _targetMessageText = "Callback Error: $e";
           }
         },
         onError: (err) {
+          _logDebug('Stream onError: $err');
           response = "AI Error: $err";
-          drawingNotifier.updateStrokeById(streamStrokeId, (s) => s.copyWith(text: response, color: Colors.red, isLocked: false, version: s.version + 1), force: true);
+          _streamDone = true;
+          _targetMessageText = response;
           if (!completer.isCompleted) completer.complete();
         },
         onDone: () {
+          _logDebug('Stream onDone');
+          _streamDone = true;
           if (!completer.isCompleted) completer.complete();
         },
       );
@@ -148,17 +281,13 @@ class AiExecutionController {
       await completer.future;
 
       if (_cancelRequested) {
+        _typewriterTimer?.cancel();
+        _typewriterTimer = null;
         drawingNotifier.updateStrokeById(streamStrokeId, (s) => s.copyWith(text: "Generation stopped by user.", color: Colors.grey, isLocked: false, version: s.version + 1), force: true);
         return;
       }
 
-      final finalExtracted = _extractMessageFromPartialJson(response);
-      if (finalExtracted.trim().isEmpty) {
-         drawingNotifier.updateStrokeById(streamStrokeId, (s) => s.copyWith(isLocked: false), force: true);
-         drawingNotifier.deleteStroke(streamStrokeId);
-      } else {
-         drawingNotifier.updateStrokeById(streamStrokeId, (s) => s.copyWith(text: finalExtracted, color: Colors.black, isLocked: false, version: s.version + 1), force: true);
-      }
+      final finalExtracted = _unescapeJsonString(_extractMessageFromPartialJson(response));
 
       try {
         String cleanJson = response.trim();
@@ -171,7 +300,13 @@ class AiExecutionController {
         final data = jsonDecode(cleanJson);
         final ops = data['ops'] as List?;
         if (ops != null && ops.isNotEmpty) {
-          await _executeAiActions(ops, canvasTransform: canvasTransform, drawingNotifier: drawingNotifier);
+          await _executeAiActions(
+            ops,
+            canvasTransform: canvasTransform,
+            drawingNotifier: drawingNotifier,
+            aiMessage: finalExtracted,
+            targetTopLeft: responsePosition,
+          );
         }
       } catch (e) {
         debugPrint("AI JSON execution error: $e");
@@ -211,11 +346,29 @@ class AiExecutionController {
     return jsonStr.substring(startIndex);
   }
 
+  String _unescapeJsonString(String input) {
+    try {
+      String clean = input;
+      if (clean.endsWith('\\')) {
+        clean = clean.substring(0, clean.length - 1);
+      }
+      return jsonDecode('"$clean"');
+    } catch (_) {
+      return input
+          .replaceAll(r'\n', '\n')
+          .replaceAll(r'\t', '\t')
+          .replaceAll(r'\"', '"')
+          .replaceAll(r'\\', '\\')
+          .replaceAll(r'\/', '/');
+    }
+  }
+
   Future<void> _executeAiActions(
     List actions, {
     required Matrix4 canvasTransform,
     required DrawingNotifier drawingNotifier,
     Offset? targetTopLeft,
+    String? aiMessage,
   }) async {
     final newStrokes = <Stroke>[];
     int objectsAdded = 0;
@@ -223,6 +376,94 @@ class AiExecutionController {
     int objectsRemoved = 0;
     final unrecognized = <String>[];
     String? aiFocusTargetId;
+
+    // Calculate bounding box of all image-space shapes/widgets to offset them as a group relative to prompt
+    double? minX, minY, maxX, maxY;
+    for (var action in actions) {
+      if (action is! Map) continue;
+      final type = action['action'] as String?;
+      if (type == null) continue;
+
+      List<Offset> points = [];
+      if (type == 'draw_rect') {
+        final rectData = action['rect'] as List?;
+        if (rectData != null && rectData.length >= 4) {
+          final x = rectData[0].toDouble();
+          final y = rectData[1].toDouble();
+          final w = rectData[2].toDouble();
+          final h = rectData[3].toDouble();
+          if (x.abs() <= 2500 && y.abs() <= 2500) {
+            points.add(Offset(x, y));
+            points.add(Offset(x + w, y + h));
+          }
+        }
+      } else if (type == 'draw_circle') {
+        final center = action['center'] as List?;
+        final r = (action['radius'] as num?)?.toDouble() ?? 50.0;
+        if (center != null && center.length >= 2) {
+          final cx = center[0].toDouble();
+          final cy = center[1].toDouble();
+          if (cx.abs() <= 2500 && cy.abs() <= 2500) {
+            points.add(Offset(cx - r, cy - r));
+            points.add(Offset(cx + r, cy + r));
+          }
+        }
+      } else if (type == 'draw_ellipse') {
+        final center = action['center'] as List?;
+        final rx = (action['rx'] as num?)?.toDouble() ?? 50.0;
+        final ry = (action['ry'] as num?)?.toDouble() ?? 30.0;
+        if (center != null && center.length >= 2) {
+          final cx = center[0].toDouble();
+          final cy = center[1].toDouble();
+          if (cx.abs() <= 2500 && cy.abs() <= 2500) {
+            points.add(Offset(cx - rx, cy - ry));
+            points.add(Offset(cx + rx, cy + ry));
+          }
+        }
+      } else if (type == 'draw_polygon' || type == 'draw_wire') {
+        final pts = action['points'] as List?;
+        if (pts != null) {
+          for (var pt in pts) {
+            if (pt is List && pt.length >= 2) {
+              final x = pt[0].toDouble();
+              final y = pt[1].toDouble();
+              if (x.abs() <= 2500 && y.abs() <= 2500) {
+                points.add(Offset(x, y));
+              }
+            }
+          }
+        }
+      } else if (type == 'draw_line') {
+        final start = action['start'] as List?;
+        final end = action['end'] as List?;
+        if (start != null && start.length >= 2 && end != null && end.length >= 2) {
+          final x1 = start[0].toDouble();
+          final y1 = start[1].toDouble();
+          final x2 = end[0].toDouble();
+          final y2 = end[1].toDouble();
+          if (x1.abs() <= 2500 && y1.abs() <= 2500) {
+            points.add(Offset(x1, y1));
+            points.add(Offset(x2, y2));
+          }
+        }
+      } else if (type == 'draw_latex' || type == 'draw_text' || type == 'insert_chemistry' || type == 'insert_widget') {
+        final pos = action['position'] as List?;
+        if (pos != null && pos.length >= 2) {
+          final x = pos[0].toDouble();
+          final y = pos[1].toDouble();
+          if (x.abs() <= 2500 && y.abs() <= 2500) {
+            points.add(Offset(x, y));
+          }
+        }
+      }
+
+      for (var pt in points) {
+        if (minX == null || pt.dx < minX) minX = pt.dx;
+        if (minY == null || pt.dy < minY) minY = pt.dy;
+        if (maxX == null || pt.dx > maxX) maxX = pt.dx;
+        if (maxY == null || pt.dy > maxY) maxY = pt.dy;
+      }
+    }
 
     final transform = canvasTransform;
     final Matrix4 inverse = Matrix4.copy(transform)..invert();
@@ -232,6 +473,14 @@ class AiExecutionController {
       // we do not need to transform it from image space to canvas space.
       if (x.abs() > 2500 || y.abs() > 2500) {
         return Offset(x, y);
+      }
+
+      if (targetTopLeft != null && minX != null && minY != null) {
+        final scale = inverse.getMaxScaleOnAxis();
+        return Offset(
+          targetTopLeft.dx + (x - minX) * scale,
+          (targetTopLeft.dy + 35.0) + (y - minY) * scale,
+        );
       }
 
       // Divide by the same pixelRatio used in CanvasExporter (0.5)
@@ -1249,6 +1498,19 @@ class AiExecutionController {
             }
           } else if (type == 'draw_text') {
             final text = action['text'] as String;
+            if (aiMessage != null) {
+              final rawText = text == "Thinking..." ? _currentMessageText : text;
+              final cleanText = rawText.trim();
+              final cleanMsg = aiMessage.trim();
+              final similarity = StringSimilarity.compareTwoStrings(cleanText, cleanMsg);
+              if (cleanText == cleanMsg ||
+                  similarity > 0.85 ||
+                  (cleanText.length > 30 &&
+                      (cleanMsg.contains(cleanText) || cleanText.contains(cleanMsg)))) {
+                // Skip duplicating the main conversational response on the canvas
+                continue;
+              }
+            }
             List? pos = action['position'] as List?;
             if (pos == null || pos.length < 2) {
               pos = [100.0, 100.0];

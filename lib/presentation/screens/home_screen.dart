@@ -321,57 +321,69 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       child: Container(
         height: 180,
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF3366D6), Color(0xFF536DFE), Color(0xFF7C4DFF)],
-          ),
+          color: const Color(0xFF094184), // Solid deep blue
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.25),
+              color: const Color(0xFF094184).withValues(alpha: 0.25),
               blurRadius: 20,
               spreadRadius: 0,
               offset: const Offset(0, 8),
             ),
           ],
         ),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Stack(
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
+            // Curvy wavy layers on the right side
+            Positioned.fill(
+              child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Text(
-                'Continue',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
+                child: CustomPaint(
+                  painter: PremiumCardWavesPainter(),
                 ),
               ),
             ),
-            const Spacer(),
-            Text(
-              page.title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Last edited ${page.dateCreated.day} ${_getMonth(page.dateCreated.month)}',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.8),
-                fontSize: 13,
+            // Text content on top
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Text(
+                      'Continue',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    page.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 20,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Last edited ${page.dateCreated.day} ${_getMonth(page.dateCreated.month)}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -769,4 +781,71 @@ class _ScaleOnPressState extends State<_ScaleOnPress>
       child: ScaleTransition(scale: _scale, child: widget.child),
     );
   }
+}
+
+class PremiumCardWavesPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // Layer 1: Medium blue wave
+    final p1 = Paint()
+      ..color = const Color(0xFF3E75BA)
+      ..style = PaintingStyle.fill;
+    final path1 = Path();
+    path1.moveTo(w * 0.58, 0);
+    path1.cubicTo(w * 0.54, h * 0.15, w * 0.54, h * 0.25, w * 0.57, h * 0.35); // first crest (left)
+    path1.cubicTo(w * 0.61, h * 0.45, w * 0.52, h * 0.60, w * 0.53, h * 0.75); // second crest (left)
+    path1.cubicTo(w * 0.54, h * 0.85, w * 0.62, h * 0.90, w * 0.58, h);
+    path1.lineTo(w, h);
+    path1.lineTo(w, 0);
+    path1.close();
+    canvas.drawPath(path1, p1);
+
+    // Layer 2: Light blue wave
+    final p2 = Paint()
+      ..color = const Color(0xFF7FAEE3)
+      ..style = PaintingStyle.fill;
+    final path2 = Path();
+    path2.moveTo(w * 0.65, 0);
+    path2.cubicTo(w * 0.61, h * 0.15, w * 0.61, h * 0.25, w * 0.64, h * 0.35);
+    path2.cubicTo(w * 0.68, h * 0.45, w * 0.59, h * 0.60, w * 0.60, h * 0.75);
+    path2.cubicTo(w * 0.61, h * 0.85, w * 0.69, h * 0.90, w * 0.65, h);
+    path2.lineTo(w, h);
+    path2.lineTo(w, 0);
+    path2.close();
+    canvas.drawPath(path2, p2);
+
+    // Layer 3: Very light blue wave
+    final p3 = Paint()
+      ..color = const Color(0xFFBDD7F5)
+      ..style = PaintingStyle.fill;
+    final path3 = Path();
+    path3.moveTo(w * 0.73, 0);
+    path3.cubicTo(w * 0.69, h * 0.15, w * 0.69, h * 0.25, w * 0.72, h * 0.35);
+    path3.cubicTo(w * 0.76, h * 0.45, w * 0.67, h * 0.60, w * 0.68, h * 0.75);
+    path3.cubicTo(w * 0.69, h * 0.85, w * 0.77, h * 0.90, w * 0.73, h);
+    path3.lineTo(w, h);
+    path3.lineTo(w, 0);
+    path3.close();
+    canvas.drawPath(path3, p3);
+
+    // Layer 4: Light off-white area
+    final p4 = Paint()
+      ..color = const Color(0xFFF1F6FE)
+      ..style = PaintingStyle.fill;
+    final path4 = Path();
+    path4.moveTo(w * 0.81, 0);
+    path4.cubicTo(w * 0.77, h * 0.15, w * 0.77, h * 0.25, w * 0.80, h * 0.35);
+    path4.cubicTo(w * 0.84, h * 0.45, w * 0.75, h * 0.60, w * 0.76, h * 0.75);
+    path4.cubicTo(w * 0.77, h * 0.85, w * 0.85, h * 0.90, w * 0.81, h);
+    path4.lineTo(w, h);
+    path4.lineTo(w, 0);
+    path4.close();
+    canvas.drawPath(path4, p4);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

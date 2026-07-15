@@ -58,6 +58,7 @@ class StrokeRenderCache {
       color: stroke.color,
       fontSize: renderedSize,
       height: 1.5,
+      fontFamilyFallback: const ['NotoColorEmoji', 'NotoSans'],
     );
 
     TextStyle textStyle;

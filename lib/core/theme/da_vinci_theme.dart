@@ -39,6 +39,32 @@ class AppColors {
 }
 
 class DaVinciTheme {
+  static TextStyle applyFallback(TextStyle style) {
+    return style.copyWith(
+      fontFamilyFallback: const ['NotoColorEmoji', 'NotoSans'],
+    );
+  }
+
+  static TextTheme applyFallbackToTextTheme(TextTheme textTheme) {
+    return textTheme.copyWith(
+      displayLarge: textTheme.displayLarge != null ? applyFallback(textTheme.displayLarge!) : null,
+      displayMedium: textTheme.displayMedium != null ? applyFallback(textTheme.displayMedium!) : null,
+      displaySmall: textTheme.displaySmall != null ? applyFallback(textTheme.displaySmall!) : null,
+      headlineLarge: textTheme.headlineLarge != null ? applyFallback(textTheme.headlineLarge!) : null,
+      headlineMedium: textTheme.headlineMedium != null ? applyFallback(textTheme.headlineMedium!) : null,
+      headlineSmall: textTheme.headlineSmall != null ? applyFallback(textTheme.headlineSmall!) : null,
+      titleLarge: textTheme.titleLarge != null ? applyFallback(textTheme.titleLarge!) : null,
+      titleMedium: textTheme.titleMedium != null ? applyFallback(textTheme.titleMedium!) : null,
+      titleSmall: textTheme.titleSmall != null ? applyFallback(textTheme.titleSmall!) : null,
+      bodyLarge: textTheme.bodyLarge != null ? applyFallback(textTheme.bodyLarge!) : null,
+      bodyMedium: textTheme.bodyMedium != null ? applyFallback(textTheme.bodyMedium!) : null,
+      bodySmall: textTheme.bodySmall != null ? applyFallback(textTheme.bodySmall!) : null,
+      labelLarge: textTheme.labelLarge != null ? applyFallback(textTheme.labelLarge!) : null,
+      labelMedium: textTheme.labelMedium != null ? applyFallback(textTheme.labelMedium!) : null,
+      labelSmall: textTheme.labelSmall != null ? applyFallback(textTheme.labelSmall!) : null,
+    );
+  }
+
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
@@ -52,27 +78,29 @@ class DaVinciTheme {
         onSurface: AppColors.textPrimary,
         error: AppColors.error,
       ),
-      textTheme: TextTheme(
-        displayLarge: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
-        headlineLarge: GoogleFonts.outfit(
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w700,
+      textTheme: applyFallbackToTextTheme(
+        TextTheme(
+          displayLarge: GoogleFonts.outfit(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
+          headlineLarge: GoogleFonts.outfit(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w700,
+          ),
+          headlineMedium: GoogleFonts.outfit(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w600,
+          ),
+          headlineSmall: GoogleFonts.outfit(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w500,
+          ),
+          bodyLarge: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 16),
+          bodyMedium: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 14),
+          bodySmall: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 12),
+          labelLarge: GoogleFonts.inter(
+            fontWeight: FontWeight.w500,
+            color: AppColors.textPrimary,
+          ), // Inter/System
         ),
-        headlineMedium: GoogleFonts.outfit(
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w600,
-        ),
-        headlineSmall: GoogleFonts.outfit(
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w500,
-        ),
-        bodyLarge: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 16),
-        bodyMedium: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 14),
-        bodySmall: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 12),
-        labelLarge: GoogleFonts.inter(
-          fontWeight: FontWeight.w500,
-          color: AppColors.textPrimary,
-        ), // Inter/System
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,

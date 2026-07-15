@@ -157,9 +157,11 @@ class DrawingNotifier extends Notifier<DrawingState> {
       _physicsTimer?.cancel();
       PhysicsEngine().stopSimulation();
       // Dispose all images on unmount
-      for (var stroke in state.strokes) {
-        stroke.decodedImage?.dispose();
-      }
+      try {
+        for (var stroke in state.strokes) {
+          stroke.decodedImage?.dispose();
+        }
+      } catch (_) {}
     });
     return DrawingState();
   }
@@ -171,18 +173,27 @@ class DrawingNotifier extends Notifier<DrawingState> {
 
     // Only do expensive spatial index / disposal work when strokes actually changed
     if (!identical(oldStrokes, newStrokes)) {
-      // 1. Detect removed strokes to handle memory leaks (ui.Image disposal)
-      if (oldStrokes.length > newStrokes.length) {
-        final newIds = newStrokes.map((s) => s.id).toSet();
-        for (var oldStroke in oldStrokes) {
-          if (!newIds.contains(oldStroke.id)) {
-            oldStroke.decodedImage?.dispose();
+      if (oldStrokes.length == newStrokes.length) {
+        // Optimization: if length is the same, just update the changed strokes in the spatial index
+        for (int i = 0; i < oldStrokes.length; i++) {
+          if (!identical(oldStrokes[i], newStrokes[i])) {
+            _spatialIndex.update(oldStrokes[i], newStrokes[i]);
           }
         }
-      }
+      } else {
+        // 1. Detect removed strokes to handle memory leaks (ui.Image disposal)
+        if (oldStrokes.length > newStrokes.length) {
+          final newIds = newStrokes.map((s) => s.id).toSet();
+          for (var oldStroke in oldStrokes) {
+            if (!newIds.contains(oldStroke.id)) {
+              oldStroke.decodedImage?.dispose();
+            }
+          }
+        }
 
-      // 2. Rebuild the spatial index only when strokes changed
-      _spatialIndex.buildIndex(newStrokes);
+        // 2. Rebuild the spatial index only when strokes changed
+        _spatialIndex.buildIndex(newStrokes);
+      }
     }
 
     super.state = value;
@@ -1559,6 +1570,16 @@ class DrawingNotifier extends Notifier<DrawingState> {
       _updateSimulationAndAi();
     }
     return count;
+  }
+
+  void updateStrokeByIdSilent(String id, Stroke Function(Stroke) updater) {
+    final newStrokes = state.strokes.map((s) {
+      if (s.id == id) {
+        return updater(s);
+      }
+      return s;
+    }).toList();
+    state = state.copyWith(strokes: newStrokes);
   }
 
   int updateStrokesByGroupId(String groupId, Stroke Function(Stroke) updater) {

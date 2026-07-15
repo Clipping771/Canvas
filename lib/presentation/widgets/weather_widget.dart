@@ -34,10 +34,18 @@ class _WeatherWidgetState extends State<WeatherWidget> {
 
   Future<Map<String, dynamic>> _fetchWeather() async {
     // 1. Geocoding
-    final geoRes = await http.get(
-      Uri.parse(
-        'https://geocoding-api.open-meteo.com/v1/search?name=${widget.city}&count=1&format=json',
-      ),
+    final geoUri = Uri.https(
+      'geocoding-api.open-meteo.com',
+      '/v1/search',
+      {
+        'name': widget.city,
+        'count': '1',
+        'format': 'json',
+      },
+    );
+    final geoRes = await http.get(geoUri).timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => throw Exception('Geocoding request timed out'),
     );
     if (geoRes.statusCode != 200) throw Exception('Geocoding failed');
     final geoData = jsonDecode(geoRes.body);
@@ -50,10 +58,20 @@ class _WeatherWidgetState extends State<WeatherWidget> {
     final realCityName = geoData['results'][0]['name'];
 
     // 2. Weather Forecast
-    final weatherRes = await http.get(
-      Uri.parse(
-        'https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto',
-      ),
+    final weatherUri = Uri.https(
+      'api.open-meteo.com',
+      '/v1/forecast',
+      {
+        'latitude': lat.toString(),
+        'longitude': lon.toString(),
+        'current_weather': 'true',
+        'daily': 'weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum',
+        'timezone': 'auto',
+      },
+    );
+    final weatherRes = await http.get(weatherUri).timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => throw Exception('Weather request timed out'),
     );
     if (weatherRes.statusCode != 200) throw Exception('Weather API failed');
 
@@ -163,7 +181,10 @@ class _WeatherWidgetState extends State<WeatherWidget> {
                 children: [
                   Text(
                     _getWeatherEmoji(code),
-                    style: const TextStyle(fontSize: 64),
+                    style: const TextStyle(
+                      fontSize: 64,
+                      fontFamilyFallback: ['NotoColorEmoji', 'NotoSans'],
+                    ),
                   ),
                   const SizedBox(width: 16),
                   Text(
@@ -243,7 +264,10 @@ class _WeatherWidgetState extends State<WeatherWidget> {
                           const SizedBox(height: 8),
                           Text(
                             _getWeatherEmoji(dailyCode),
-                            style: const TextStyle(fontSize: 32),
+                            style: const TextStyle(
+                              fontSize: 32,
+                              fontFamilyFallback: ['NotoColorEmoji', 'NotoSans'],
+                            ),
                           ),
                           const SizedBox(height: 8),
                           Row(

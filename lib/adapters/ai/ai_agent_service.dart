@@ -160,7 +160,7 @@ Supported actions for the "ops" array:
 9. {"action": "delete_area", "rect": [x, y, w, h]}
 10. {"action": "undo", "count": 1}
 12. {"action": "learn_rule", "rule": "Never draw over the image"}
-13. {"action": "insert_widget", "type": "weather", "city": "London", "position": [x, y], "days": 3} (You can set days up to 7 if requested)
+13. {"action": "insert_widget", "type": "weather", "city": "London", "position": [x, y], "days": 3} (IMPORTANT: The "city" parameter MUST be only the clean, pure name of the city, e.g. "Adelaide" or "London". DO NOT include words like "weather", "today", "forecast", or question marks. Strip all extra text and pass only the clean location name! You can set days up to 7 if requested)
 14. {"action": "draw_template", "name": "mountain", "position": [x, y], "size": 250, "color": "0xFF8B7355", "isFilled": true, "overlap": true}
 15. {"action": "draw_composite", "name": "cat", "position": [x, y], "scale": 1.0, "parts": [{"type": "ellipse", "name": "head", "cx": 0, "cy": -50, "rx": 30, "ry": 25, "color": "0xFF000000", "details": [{"type": "polygon", "name": "ear_L", "points": [[-20,-70], [-30,-90], [-10,-80]]}]}, {"type": "organic_path", "name": "body", "base_points": [[-20,-20],[20,-20],[20,40],[-20,40]], "noise_level": 5.0}, {"type": "bezier_curve", "name": "tail", "p0": [0,40], "p1": [20,60], "p2": [30,30], "p3": [50,50]}]}
 
@@ -245,7 +245,7 @@ User prompt: ''';
     List<Map<String, String>> chatHistory,
   ) async* {
     final url = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/$modelId:streamGenerateContent?alt=sse&key=$apiKey',
+      'https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent?key=$apiKey',
     );
 
     final parts = <Map<String, dynamic>>[
@@ -276,31 +276,25 @@ User prompt: ''';
       "contents": [...historyParts, {"role": "user", "parts": parts}],
     };
 
-    final request = http.Request('POST', url)
-      ..headers['Content-Type'] = 'application/json'
-      ..body = jsonEncode(payload);
-
-    final streamedResponse = await client.send(request).timeout(
+    final response = await client.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    ).timeout(
       const Duration(seconds: 30),
-      onTimeout: () => throw Exception('Connection timed out'),
+      onTimeout: () => throw Exception('Connection timed out. Please check your internet connection.'),
     );
-    if (streamedResponse.statusCode != 200) {
-      final body = await streamedResponse.stream.bytesToString();
-      throw Exception('Status ${streamedResponse.statusCode}: $body');
+
+    if (response.statusCode != 200) {
+      throw Exception('Status ${response.statusCode}: ${response.body}');
     }
 
-    String accumulated = '';
-    await for (final line in streamedResponse.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())) {
-      if (line.startsWith('data: ')) {
-        try {
-          final dataJson = jsonDecode(line.substring(6));
-          final text = dataJson['candidates']?[0]?['content']?['parts']?[0]?['text'] ?? '';
-          accumulated += text;
-          yield accumulated;
-        } catch (_) {}
-      }
+    final dataJson = jsonDecode(response.body);
+    final text = dataJson['candidates']?[0]?['content']?['parts']?[0]?['text'] ?? '';
+    if (text.isNotEmpty) {
+      yield text;
+    } else {
+      yield "API Error: Received empty response from Gemini.";
     }
   }
 
@@ -638,7 +632,7 @@ Supported actions for the "ops" array:
 9. {"action": "delete_area", "rect": [x, y, w, h]}
 10. {"action": "undo", "count": 1}
 12. {"action": "learn_rule", "rule": "Never draw over the image"}
-13. {"action": "insert_widget", "type": "weather", "city": "London", "position": [x, y], "days": 3} (You can set days up to 7 if requested)
+13. {"action": "insert_widget", "type": "weather", "city": "London", "position": [x, y], "days": 3} (IMPORTANT: The "city" parameter MUST be only the clean, pure name of the city, e.g. "Adelaide" or "London". DO NOT include words like "weather", "today", "forecast", or question marks. Strip all extra text and pass only the clean location name! You can set days up to 7 if requested)
 14. {"action": "draw_template", "name": "mountain", "position": [x, y], "size": 250, "color": "0xFF8B7355", "isFilled": true, "overlap": true} (Use this to place standard pre-drawn template assets. Available templates: mountain, tree, sun, river, bird, cloud, house, car, cat, dog, train, frog.)
 15. {"action": "draw_composite", "name": "cat", "position": [x, y], "scale": 1.0, "parts": [{"type": "ellipse", "name": "head", "cx": 0, "cy": -50, "rx": 30, "ry": 25, "color": "0xFF000000", "details": [{"type": "polygon", "name": "ear_L", "points": [[-20,-70], [-30,-90], [-10,-80]]}]}, {"type": "organic_path", "name": "body", "base_points": [[-20,-20],[20,-20],[20,40],[-20,40]], "noise_level": 5.0}, {"type": "bezier_curve", "name": "tail", "p0": [0,40], "p1": [20,60], "p2": [30,30], "p3": [50,50]}]} (Use this for highly structural graphs where geometric shapes are needed, or if the user explicitly asks for abstract geometric composition).
 16. {"action": "draw_svg", "path": "M 10 10 C 20 20, 40 20, 50 10 Z", "position": [x, y], "scale": 1.0, "color": "0xFF00FF00"} (CRITICAL MASSIVE CAPABILITY: If the user asks you to draw an object that is NOT in the draw_template list (e.g., 'draw a spaceship', 'draw a laptop', 'draw a dragon', 'draw an eye'), YOU MUST generate a detailed SVG path string representing that object and use this action! You have seen millions of SVG icons in your training, use that knowledge to output a stunning SVG `d` path! Keep the coordinates roughly within a 0-100 viewport and the engine will scale it for you.)

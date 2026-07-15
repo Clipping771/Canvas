@@ -48,10 +48,14 @@ class VinciBoardApp extends ConsumerWidget {
     ThemeData theme = DaVinciTheme.lightTheme;
     try {
       theme = theme.copyWith(
-        textTheme: GoogleFonts.getTextTheme(fontName, theme.textTheme),
-        primaryTextTheme: GoogleFonts.getTextTheme(
-          fontName,
-          theme.primaryTextTheme,
+        textTheme: DaVinciTheme.applyFallbackToTextTheme(
+          GoogleFonts.getTextTheme(fontName, theme.textTheme),
+        ),
+        primaryTextTheme: DaVinciTheme.applyFallbackToTextTheme(
+          GoogleFonts.getTextTheme(
+            fontName,
+            theme.primaryTextTheme,
+          ),
         ),
       );
     } catch (_) {

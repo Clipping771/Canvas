@@ -354,67 +354,10 @@ class DrawingCanvasPainter extends CustomPainter {
     }
 
     if (stroke.toolType == ToolType.widget && stroke.text != null) {
-      try {
-        final data = StrokeRenderCache().getParsedJson(stroke);
-        if (data != null &&
-            data['action'] == 'insert_widget' &&
-            data['type'] == 'weather') {
-          final loc = data['location'] ?? 'Unknown';
-          final temp = data['temp'] ?? '--';
-          final cond = data['condition'] ?? 'Clear';
-          final p = stroke.points.isNotEmpty
-              ? stroke.points.first
-              : Offset.zero;
-
-          final cardRect = Rect.fromLTWH(p.dx, p.dy, 250, 120);
-          final cardPaint = Paint()
-            ..color = Colors.blueGrey.shade800
-            ..style = PaintingStyle.fill
-            ..maskFilter = const MaskFilter.blur(BlurStyle.solid, 4);
-
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(cardRect, const Radius.circular(16)),
-            cardPaint,
-          );
-
-          // For weather widget TextPainters, ideally they are also cached, but for now we skip caching them individually as this is an edge case.
-          final tpLoc = TextPainter(
-            text: TextSpan(
-              text: "$loc",
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            textDirection: TextDirection.ltr,
-          )..layout();
-          tpLoc.paint(canvas, Offset(p.dx + 20, p.dy + 20));
-
-          final tpTemp = TextPainter(
-            text: TextSpan(
-              text: "$temp",
-              style: const TextStyle(
-                color: Colors.cyanAccent,
-                fontSize: 36,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            textDirection: TextDirection.ltr,
-          )..layout();
-          tpTemp.paint(canvas, Offset(p.dx + 20, p.dy + 55));
-
-          final tpCond = TextPainter(
-            text: TextSpan(
-              text: "$cond",
-              style: const TextStyle(color: Colors.white70, fontSize: 20),
-            ),
-            textDirection: TextDirection.ltr,
-          )..layout();
-          tpCond.paint(canvas, Offset(p.dx + 120, p.dy + 65));
-          return;
-        }
-      } catch (_) {}
+      final isCircuit = stroke.text!.contains('"type":"circuit"');
+      if (!isCircuit) {
+        return;
+      }
     }
 
     if (stroke.text != null && !stroke.text!.startsWith('{"type":"template"')) {
